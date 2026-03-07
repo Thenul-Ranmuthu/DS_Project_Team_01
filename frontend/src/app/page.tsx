@@ -1,28 +1,105 @@
+"use client";
+
+import Link from "next/link";
 import FileList from "./components/FileList";
 import FileUpload from "./components/FileUpload";
 
 export default function Home() {
   return (
-    <main className="min-h-screen p-8 bg-slate-900 text-slate-100 flex flex-col items-center">
-      <div className="w-full max-w-4xl space-y-8">
-        <header className="text-center pb-8 border-b border-slate-700/50 pt-8">
-          <h1 className="text-5xl font-extrabold tracking-tight bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent drop-shadow-sm">
-            Distributed File Base
-          </h1>
-          <p className="mt-4 text-lg text-slate-400 font-medium">Powered by Go, Raft, BoltDB, and Next.js</p>
+    <main className="min-h-screen bg-[#050505] text-white selection:bg-blue-500/30">
+      {/* Dynamic Background */}
+      <div className="fixed inset-0 -z-10 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-900/10 via-black to-black opacity-60"></div>
+
+      <div className="max-w-[1440px] mx-auto p-4 md:p-8 lg:p-12">
+        {/* Header Unit */}
+        <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-16 px-4">
+          <div className="space-y-2">
+            <h1 className="text-4xl md:text-5xl font-display font-black tracking-tight flex items-center gap-3">
+              <span className="bg-gradient-to-br from-white to-white/40 bg-clip-text text-transparent italic">DISTRIBUTED</span>
+              <span className="text-blue-500 italic">SYSTEMS</span>
+            </h1>
+            <div className="flex items-center gap-3">
+              <span className="h-px w-8 bg-blue-500/50"></span>
+              <p className="text-[10px] md:text-xs font-mono font-bold tracking-[0.3em] uppercase opacity-50">
+                RAFT CONSENSUS / METADATA SYNC / BLOCKET STORE
+              </p>
+            </div>
+          </div>
+
+          <nav className="flex items-center gap-4">
+            <Link
+              href="/debug"
+              className="group relative px-6 py-2.5 overflow-hidden rounded-full font-bold uppercase tracking-widest text-[10px] bg-white/5 border border-white/10 glass-hover transition-all"
+            >
+              <span className="relative z-10 group-hover:text-blue-400">Debug Console</span>
+              <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-blue-500 to-transparent scale-x-0 group-hover:scale-x-100 transition-transform duration-500"></div>
+            </Link>
+          </nav>
         </header>
 
-        <section className="bg-slate-800/80 backdrop-blur-md border border-slate-700 p-8 rounded-2xl shadow-2xl hover:border-slate-600 transition-all duration-300">
-          <FileUpload />
-        </section>
+        {/* Dashboard Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
 
-        <section className="bg-slate-800/80 backdrop-blur-md border border-slate-700 p-8 rounded-2xl shadow-2xl hover:border-slate-600 transition-all duration-300">
-          <h2 className="text-2xl font-bold mb-6 text-slate-100 flex items-center gap-2">
-            <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
-            Available Files
-          </h2>
-          <FileList />
-        </section>
+          {/* Left Col: Actions */}
+          <section className="lg:col-span-4 space-y-8 animate-in fade-in slide-in-from-left-4 duration-700">
+            <div className="glass p-8 rounded-3xl relative overflow-hidden group">
+              <div className="absolute -top-12 -right-12 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl group-hover:bg-blue-500/20 transition-all"></div>
+
+              <h2 className="text-lg font-display font-bold uppercase tracking-widest mb-8 flex items-center gap-3">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+                Input Terminal
+              </h2>
+
+              <FileUpload />
+            </div>
+
+            <div className="glass p-6 rounded-2xl border-white/5 bg-white/1 flex items-center justify-between group cursor-default">
+              <div className="space-y-1">
+                <p className="text-[10px] font-mono uppercase opacity-40 font-bold tracking-widest leading-none">Cluster Health</p>
+                <p className="text-sm font-bold text-emerald-400 group-hover:text-emerald-300 transition-colors uppercase leading-none">Operational</p>
+              </div>
+              <div className="flex gap-1.5">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="w-1 h-3 rounded-full bg-emerald-500/30 animate-pulse" style={{ animationDelay: `${i * 150}ms` }}></div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          {/* Right Col: Data */}
+          <section className="lg:col-span-8 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-150">
+            <div className="glass p-1 rounded-3xl min-h-[600px] flex flex-col bg-white/2 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.6)]">
+              <div className="p-8 border-b border-white/10 flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-display font-bold uppercase tracking-widest">Replicated Assets</h2>
+                  <p className="text-[10px] font-mono opacity-20 uppercase tracking-[0.25em] mt-1">Virtual Path: /mnt/raft/storage</p>
+                </div>
+                <div className="h-8 w-8 rounded-full border border-white/10 bg-white/5 flex items-center justify-center">
+                  <div className="w-1 h-1 rounded-full bg-white opacity-40"></div>
+                </div>
+              </div>
+
+              <div className="flex-1 p-6 lg:p-10">
+                <FileList />
+              </div>
+            </div>
+          </section>
+
+        </div>
+
+        {/* System Footer */}
+        <footer className="mt-32 pt-12 border-t border-white/5 text-[9px] font-mono opacity-20 uppercase tracking-[0.4em] flex flex-col md:flex-row gap-8 justify-between items-center text-center italic">
+          <div className="flex items-center gap-4">
+            <span>PROJECT: DS_TEAM_01</span>
+            <span className="h-px w-4 bg-white/30"></span>
+            <span>VER: 4.0.0-PRO</span>
+          </div>
+          <span>&copy; 2026 DISTRIBUTED SYSTEMS LABORATORY / END-TO-END REPLICATION</span>
+          <div className="flex gap-12">
+            <span>SECURE-BOOT: ENABLED</span>
+            <span>ECC-CONSENSUS: STABLE</span>
+          </div>
+        </footer>
       </div>
     </main>
   );

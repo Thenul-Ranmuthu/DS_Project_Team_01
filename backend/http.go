@@ -13,8 +13,9 @@ import (
 )
 
 type HttpServer struct {
-	raft  *raft.Raft
-	store *Store
+	raft   *raft.Raft
+	store  *Store
+	nodeID string
 }
 
 func (s *HttpServer) handleUpload(w http.ResponseWriter, r *http.Request) {
@@ -142,12 +143,29 @@ func (s *HttpServer) handleJoin(w http.ResponseWriter, r *http.Request) {
 
 func (s *HttpServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	leaderAddr, leaderID := s.raft.LeaderWithID()
+	stats := s.raft.Stats()
+	
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"state":       s.raft.State().String(),
-		"leader_addr": string(leaderAddr),
-		"leader_id":   string(leaderID),
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"node_id":        s.nodeID,
+		"state":          s.raft.State().String(),
+		"leader_addr":    string(leaderAddr),
+		"leader_id":      string(leaderID),
+		"commit_index":   stats["commit_index"],
+		"applied_index":  stats["applied_index"],
+		"last_log_index": stats["last_log_index"],
+		"num_peers":      stats["num_peers"],
+		"term":           stats["term"],
 	})
+}
+
+func (s *HttpServer) handleShutdown(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[HTTP] Remote shutdown requested...")
+	w.WriteHeader(http.StatusOK)
+	go func() {
+		time.Sleep(1 * time.Second)
+		os.Exit(0)
+	}()
 }
 
 func applyCORS(next http.HandlerFunc) http.HandlerFunc {
@@ -163,14 +181,15 @@ func applyCORS(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func StartHttpServer(addr string, r *raft.Raft, store *Store) {
-	server := &HttpServer{raft: r, store: store}
+func StartHttpServer(addr string, r *raft.Raft, store *Store, nodeID string) {
+	server := &HttpServer{raft: r, store: store, nodeID: nodeID}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/upload", applyCORS(server.handleUpload))
 	mux.HandleFunc("/download", applyCORS(server.handleDownload))
 	mux.HandleFunc("/files", applyCORS(server.handleList))
 	mux.HandleFunc("/join", applyCORS(server.handleJoin))
 	mux.HandleFunc("/status", applyCORS(server.handleStatus))
+	mux.HandleFunc("/shutdown", applyCORS(server.handleShutdown))
 	
 	httpServer := &http.Server{
 		Addr:    addr,

@@ -17,62 +17,49 @@ export default function FileUpload() {
 
     const findLeaderAndUpload = async (fileToUpload: File) => {
         setUploading(true);
-        setMessage("🔍 Finding cluster leader...");
+        setMessage("Detecting leader...");
 
         for (const nodeUrl of BACKEND_NODES) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 1000);
             try {
-                console.log(`Checking leader status at ${nodeUrl}...`);
-                const statusRes = await fetch(`${nodeUrl}/status`, { signal: AbortSignal.timeout(1000) });
+                const statusRes = await fetch(`${nodeUrl}/status`, { signal: controller.signal });
+                clearTimeout(timeoutId);
                 if (!statusRes.ok) continue;
-
                 const status = await statusRes.json();
-                const targetUrl = status.state === "Leader" ? nodeUrl : null;
-
-                if (targetUrl) {
-                    console.log(`Leader found at ${targetUrl}. Starting upload...`);
-                    return await uploadToNode(targetUrl, fileToUpload);
+                if (status.state === "Leader") {
+                    return await uploadToNode(nodeUrl, fileToUpload);
                 }
             } catch (err) {
-                console.warn(`Node ${nodeUrl} is unreachable.`);
+                clearTimeout(timeoutId);
+                continue;
             }
         }
-
-        // fallback: if no node reports being leader, try 423 redirect trick on node 0
         return await uploadToNode(BACKEND_NODES[0], fileToUpload);
     };
 
     const uploadToNode = async (nodeUrl: string, fileToUpload: File) => {
-        setMessage(`📤 Uploading to ${nodeUrl}...`);
+        setMessage(`Broadcasting to ${nodeUrl.replace('http://localhost:', 'node:')}...`);
         const formData = new FormData();
         formData.append("file", fileToUpload);
 
         try {
-            const res = await fetch(`${nodeUrl}/upload`, {
-                method: "POST",
-                body: formData,
-            });
-
+            const res = await fetch(`${nodeUrl}/upload`, { method: "POST", body: formData });
             if (res.ok) {
-                setMessage("✅ File uploaded successfully!");
+                setMessage("Sync complete.");
                 setFile(null);
                 setTimeout(() => window.location.reload(), 1500);
             } else if (res.status === 423) {
-                // Our custom leader hint
                 const data = await res.json();
                 if (data.leader) {
-                    // The leader address from Raft is 127.0.0.1:900x. We need http port 800x.
                     const port = parseInt(data.leader.split(":")[1]) - 1000;
-                    const leaderHttp = `http://localhost:${port}`;
-                    setMessage(`↪️ Redirecting to leader at ${leaderHttp}...`);
-                    return await uploadToNode(leaderHttp, fileToUpload);
+                    return await uploadToNode(`http://localhost:${port}`, fileToUpload);
                 }
-                throw new Error("Cluster is still electing a leader.");
             } else {
-                const text = await res.text();
-                setMessage(`❌ Upload failed: ${text}`);
+                setMessage(`Upload aborted.`);
             }
         } catch (err: any) {
-            setMessage(`❌ Error: ${err.message}`);
+            setMessage(`Node error.`);
         } finally {
             setUploading(false);
         }
@@ -85,42 +72,58 @@ export default function FileUpload() {
     };
 
     return (
-        <form onSubmit={handleUpload} className="space-y-6">
-            <div
-                className="flex flex-col items-center justify-center w-full"
-                onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={(e) => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files?.[0]) setFile(e.dataTransfer.files[0]); }}
-            >
+        <form onSubmit={handleUpload} className="space-y-8">
+            <div className="relative group">
+                <input id="dropzone-file" type="file" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
                 <label
                     htmlFor="dropzone-file"
-                    className={`flex flex-col items-center justify-center w-full h-56 border-2 border-dashed rounded-xl cursor-pointer transition-all duration-300 ${dragging ? "border-blue-400 bg-blue-900/20" : "border-slate-600 bg-slate-900/50 hover:bg-slate-800"
+                    className={`flex flex-col items-center justify-center w-full h-56 rounded-3xl border border-dashed cursor-pointer transition-all duration-500 overflow-hidden relative ${dragging
+                            ? "border-blue-500 bg-blue-500/10 shadow-[0_0_80px_-20px_rgba(59,130,246,0.3)]"
+                            : "border-white/10 bg-white/5 hover:border-white/30 hover:bg-white/10"
                         }`}
+                    onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                    onDragLeave={() => setDragging(false)}
+                    onDrop={(e) => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files?.[0]) setFile(e.dataTransfer.files[0]); }}
                 >
-                    <div className="flex flex-col items-center justify-center pt-5 pb-6 text-slate-400 relative">
-                        <div className={`p-4 rounded-full mb-4 transition-all duration-500 ${dragging ? 'bg-blue-500/20 scale-110' : 'bg-slate-800'}`}>
-                            <svg className={`w-10 h-10 ${dragging ? 'text-blue-400' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                    <div className="flex flex-col items-center justify-center p-8 text-center space-y-4">
+                        <div className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-500 ${dragging ? 'bg-blue-500 scale-110' : 'bg-white/5 group-hover:bg-white/10'}`}>
+                            <svg className={`w-8 h-8 transition-colors ${dragging ? 'text-white' : 'text-white/40 group-hover:text-white'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
                         </div>
-                        <p className="mb-2 text-base">
-                            <span className="font-semibold text-blue-400">Click to upload</span> or drag and drop
-                        </p>
-                        {file && <span className="text-emerald-400 font-medium">Selected: {file.name}</span>}
+                        <div className="space-y-1">
+                            <p className="font-display font-black text-sm uppercase tracking-widest text-white/90">
+                                {file ? file.name : "Inject Fragment"}
+                            </p>
+                            <p className="text-[10px] uppercase font-mono tracking-widest opacity-30 italic">Drag fragments onto surface</p>
+                        </div>
                     </div>
-                    <input id="dropzone-file" type="file" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
                 </label>
+                {file && (
+                    <div className="absolute top-2 right-2 px-3 py-1 bg-emerald-500 text-black text-[8px] font-black uppercase rounded-full animate-pulse shadow-[0_0_20px_rgba(16,185,129,0.3)]">
+                        READY
+                    </div>
+                )}
             </div>
 
-            <div className="flex items-center justify-between pt-8">
-                <span className={`text-sm font-medium ${message.includes('❌') ? 'text-red-400' : 'text-emerald-400'}`}>
-                    {message}
-                </span>
+            <div className="space-y-4">
                 <button
                     type="submit"
                     disabled={!file || uploading}
-                    className="px-8 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold rounded-lg disabled:opacity-50 transition-all shadow-lg shadow-blue-500/25 flex items-center gap-2"
+                    className="w-full group h-14 bg-gradient-to-br from-white to-white/70 hover:from-blue-500 hover:to-blue-600 text-black hover:text-white font-display font-black uppercase tracking-[0.3em] transition-all rounded-2xl active:scale-[0.98] disabled:opacity-5 disabled:grayscale shadow-xl shadow-black/20"
                 >
-                    {uploading ? "Processing..." : "Upload File"}
+                    {uploading ? (
+                        <span className="flex items-center justify-center gap-3">
+                            <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                            <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: '200ms' }}></span>
+                            <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: '400ms' }}></span>
+                        </span>
+                    ) : "Commit Fragment"}
                 </button>
+                <div className="flex items-center gap-3 px-2">
+                    <div className={`h-1 w-1 rounded-full ${message.includes('❌') ? 'bg-red-500' : 'bg-blue-500'} animate-pulse`}></div>
+                    <p className={`text-[9px] font-mono uppercase font-bold tracking-[0.15em] ${message.includes('❌') ? 'text-red-500' : 'text-blue-400 opacity-60'}`}>
+                        {message || "Terminal standby."}
+                    </p>
+                </div>
             </div>
         </form>
     );

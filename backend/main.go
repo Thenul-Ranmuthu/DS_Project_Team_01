@@ -101,7 +101,7 @@ func main() {
 		}()
 	}
 
-	StartHttpServer(*httpAddr, r, store)
+	StartHttpServer(*httpAddr, r, store, *nodeID)
 	log.Printf("Node %s running HTTP on %s, Raft on %s", *nodeID, *httpAddr, *raftAddr)
 
 	select {}

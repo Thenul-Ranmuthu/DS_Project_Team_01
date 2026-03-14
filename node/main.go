@@ -18,6 +18,7 @@ func main() {
 	router.POST("/createUser", controllers.CreateUser)
 
 	router.GET("/ping", controllers.PingEndPoint)
+
 	router.POST("/upload/:email", controllers.UploadMultipleFiles)
 	router.GET("/users/files/:email", controllers.GetUserFiles)
 	router.GET("/files/:id", controllers.GetFileByID)

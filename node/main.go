@@ -24,5 +24,8 @@ func main() {
 	router.GET("/files/:id", controllers.GetFileByID)
 	router.DELETE("/files/:id", controllers.DeleteFile)
 
+	// Lamport clock — lets other nodes (or a monitor) read this node's logical time
+	router.GET("/clock", controllers.GetClock)
+
 	router.Run()
 }

@@ -31,7 +31,7 @@ func (c *NTPClock) Sync(server string) error {
 func (c *NTPClock) Now() time.Time {
     c.mu.RLock()
     defer c.mu.RUnlock()
-    return time.Now().Add(c.offset)
+    return NTP.Now().Add(c.offset)
 }
 
 // Offset returns the raw offset for inspection.

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"log"
+
+	clock "github.com/DS_node/Clock"
 	controllers "github.com/DS_node/Controllers"
 	initializers "github.com/DS_node/Initializers"
 	"github.com/DS_node/migrate"
@@ -10,6 +13,10 @@ import (
 func init() {
 	initializers.LoadEnvVaribles()
 	migrate.MigrateDB()
+
+	if err := clock.NTP.Sync("pool.ntp.org"); err != nil {
+		log.Printf("[NTPClock] Sync failed: %v", err)
+	}
 }
 
 func main() {

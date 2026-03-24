@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"time"
 
 	clock "github.com/DS_node/Clock"
 	controllers "github.com/DS_node/Controllers"
@@ -14,9 +15,20 @@ func init() {
 	initializers.LoadEnvVaribles()
 	migrate.MigrateDB()
 
+	// Initial sync at startup
 	if err := clock.NTP.Sync("pool.ntp.org"); err != nil {
-		log.Printf("[NTPClock] Sync failed: %v", err)
+		log.Printf("[NTPClock] Initial sync failed: %v", err)
 	}
+
+	// Re-sync every 10 minutes in the background
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		for range ticker.C {
+			if err := clock.NTP.Sync("pool.ntp.org"); err != nil {
+				log.Printf("[NTPClock] Re-sync failed: %v", err)
+			}
+		}
+	}()
 }
 
 func main() {

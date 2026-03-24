@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"time"
 
 	clock "github.com/DS_node/Clock"
 	"github.com/DS_node/models"
@@ -70,7 +69,7 @@ func UploadMultipleFiles(c *gin.Context) {
  
 	for _, fileHeader := range files {
 		ext := filepath.Ext(fileHeader.Filename)
-		storedName := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
+		storedName := fmt.Sprintf("%d%s", clock.NTP.Now().UnixNano(), ext)
 		savePath := filepath.Join(uploadDir, storedName)
  
 		if err := c.SaveUploadedFile(fileHeader, savePath); err != nil {

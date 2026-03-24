@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 
+	clock "github.com/DS_node/Clock"
 	"github.com/DS_node/repositories"
 	"github.com/gin-gonic/gin"
 )
@@ -46,6 +47,23 @@ func GetFileByID(c *gin.Context) {
 
 func DeleteFile(c *gin.Context) {
 	fileIDStr := c.Param("id")
+
+	var clockValue uint64
+	if senderClockStr := c.GetHeader("X-Lamport-Clock"); senderClockStr != "" {
+		senderClock, err := strconv.ParseUint(senderClockStr, 10, 64)
+		if err == nil {
+			// Received a clock value from another node: sync before proceeding.
+			clockValue = clock.Node.Sync(senderClock)
+		} else {
+			clockValue = clock.Node.Tick()
+		}
+	} else {
+		// Local upload event: tick the clock.
+		clockValue = clock.Node.Tick()
+	}
+ 
+	fmt.Printf("[LamportClock] Delete event received. Clock advanced to: %d\n", clockValue)
+
 	fileID, err := strconv.ParseUint(fileIDStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file ID"})

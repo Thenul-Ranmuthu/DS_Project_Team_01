@@ -2,14 +2,19 @@ package main
 
 import (
 	"log"
+	"os"
 	"time"
 
 	clock "github.com/DS_node/Clock"
 	controllers "github.com/DS_node/Controllers"
 	initializers "github.com/DS_node/Initializers"
+	"github.com/DS_node/election"
 	"github.com/DS_node/migrate"
+	"github.com/DS_node/models"
 	"github.com/gin-gonic/gin"
 )
+
+var em *election.ElectionManager
 
 func init() {
 	initializers.LoadEnvVaribles()
@@ -27,6 +32,34 @@ func init() {
 			if err := clock.NTP.Sync("pool.ntp.org"); err != nil {
 				log.Printf("[NTPClock] Re-sync failed: %v", err)
 			}
+		}
+	}()
+
+	zkServers := []string{"172.30.112.1:2181"}
+	nodeID := os.Getenv("NODE_ID")
+	if nodeID == "" {
+		log.Fatal("NODE_ID environment variable is required")
+	}
+
+	var err error
+	em, err = election.NewElectionManager(zkServers, nodeID)
+	if err != nil {
+		log.Fatalf("Election manager init failed: %v", err)
+	}
+
+	// Set callbacks to integrate with your replication/clock packages
+
+	em.SetOnBecomeLeader(func() {
+		log.Println("This node is now leader — start accepting writes")
+		initializers.DB.Create(&models.ElectionEvent{
+			NodeID:    nodeID,
+			EventType: "became_leader",
+		})
+	})
+
+	go func() {
+		if err := em.Start(); err != nil {
+			log.Fatalf("Election failed: %v", err)
 		}
 	}()
 }

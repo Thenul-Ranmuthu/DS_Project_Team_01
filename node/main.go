@@ -79,5 +79,8 @@ func main() {
 	// Lamport clock — lets other nodes (or a monitor) read this node's logical time
 	router.GET("/clock", controllers.GetClock)
 
+	router.GET("/election/status", em.HandleStatus)
+	router.POST("/election/resign", em.HandleResign)
+
 	router.Run()
 }

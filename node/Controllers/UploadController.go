@@ -2,14 +2,15 @@ package controllers
 
 import (
 	"fmt"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 
 	clock "github.com/DS_node/Clock"
 	"github.com/DS_node/models"
+	"github.com/DS_node/pkg/storage"
 	"github.com/DS_node/repositories"
 	"github.com/gin-gonic/gin"
 )
@@ -46,7 +47,7 @@ func UploadMultipleFiles(c *gin.Context) {
 		clockValue = clock.Node.Tick()
 	}
  
-	fmt.Printf("[LamportClock] Upload event received. Clock advanced to: %d\n", clockValue)
+	slog.Info("Upload event received", "lamport_clock", clockValue)
  
 	// Resolve the uploading user by email.
 	usr, errorUser := repositories.GetUserByEmail(c.Param("email"))
@@ -62,17 +63,15 @@ func UploadMultipleFiles(c *gin.Context) {
 	}
  
 	files := form.File["files"]
-	uploadDir := "./uploads"
-	os.MkdirAll(uploadDir, os.ModePerm)
- 
 	var savedRecords []models.UploadedFile
  
 	for _, fileHeader := range files {
 		ext := filepath.Ext(fileHeader.Filename)
 		storedName := fmt.Sprintf("%d%s", clock.NTP.Now().UnixNano(), ext)
-		savePath := filepath.Join(uploadDir, storedName)
+		savePath := filepath.Join("./uploads", storedName)
  
-		if err := c.SaveUploadedFile(fileHeader, savePath); err != nil {
+		if err := storage.FS.Save(fileHeader, savePath); err != nil {
+			slog.Error("Failed to save file", "error", err, "path", savePath)
 			continue
 		}
  

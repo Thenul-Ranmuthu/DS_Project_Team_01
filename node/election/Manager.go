@@ -3,12 +3,14 @@ package election
 import (
 	"fmt"
 	"log"
+	"log/slog"
 	"path"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/DS_node/pkg/retry"
 	"github.com/go-zookeeper/zk"
 )
 
@@ -41,8 +43,11 @@ func NewElectionManager(zkServers []string, nodeID string) (*ElectionManager, er
 		nodeID: nodeID,
 	}
 
-	// Ensure persistent parent path exists
-	if err := em.ensurePath(zkElectionPath); err != nil {
+	// Ensure persistent parent path exists with retries
+	err = retry.Do(5, "zk_ensure_path", func() error {
+		return em.ensurePath(zkElectionPath)
+	})
+	if err != nil {
 		return nil, err
 	}
 
@@ -88,7 +93,7 @@ func (em *ElectionManager) runElection() error {
 			em.leaderID = em.nodeID
 			em.mu.Unlock()
 
-			log.Printf("[%s] Became LEADER", em.nodeID)
+			slog.Info("Election state changed", "node_id", em.nodeID, "state", "LEADER")
 			if em.onBecomeLeader != nil {
 				em.onBecomeLeader()
 			}
@@ -111,7 +116,7 @@ func (em *ElectionManager) runElection() error {
 			em.mu.Unlock()
 		}
 
-		log.Printf("[%s] Follower. Watching predecessor: %s", em.nodeID, predecessor)
+		slog.Info("Election state changed", "node_id", em.nodeID, "state", "FOLLOWER", "watching", predecessor)
 
 		// Block until predecessor disappears
 		exists, _, watchCh, err := em.conn.ExistsW(predecessor)
@@ -125,7 +130,7 @@ func (em *ElectionManager) runElection() error {
 
 		// Wait for predecessor deletion event
 		event := <-watchCh
-		log.Printf("[%s] Watch fired: %v — re-running election", em.nodeID, event.Type)
+		slog.Warn("Watch fired — re-running election", "node_id", em.nodeID, "event_type", event.Type)
 		// Loop back and re-check
 	}
 }
@@ -213,12 +218,26 @@ func (em *ElectionManager) watchLeader() {
 		em.leaderID = string(data)
 		em.mu.Unlock()
 
-		log.Printf("[%s] Leader is: %s", em.nodeID, string(data))
+		slog.Info("Leader updated", "node_id", em.nodeID, "leader_id", string(data))
 
 		// Block until the leader znode changes or disappears
 		<-watchCh
 
-		log.Printf("[%s] Leader znode changed — re-checking leader", em.nodeID)
+		slog.Warn("Leader znode changed — re-checking leader", "node_id", em.nodeID)
 		// Loop back and re-read who the new leader is
 	}
+}
+
+func (em *ElectionManager) GetLeaderID() string {
+	return em.LeaderID()
+}
+
+func (em *ElectionManager) GetLeaderAddress() string {
+	return em.LeaderID()
+}
+
+func (em *ElectionManager) IsConnected() bool {
+	em.mu.RLock()
+	defer em.mu.RUnlock()
+	return em.conn != nil && em.conn.State() == zk.StateHasSession
 }

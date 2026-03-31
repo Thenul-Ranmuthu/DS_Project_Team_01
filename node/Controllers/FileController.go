@@ -1,12 +1,12 @@
 package controllers
 
 import (
-	"fmt"
+	"log/slog"
 	"net/http"
-	"os"
 	"strconv"
 
 	clock "github.com/DS_node/Clock"
+	"github.com/DS_node/pkg/storage"
 	"github.com/DS_node/repositories"
 	"github.com/gin-gonic/gin"
 )
@@ -62,7 +62,7 @@ func DeleteFile(c *gin.Context) {
 		clockValue = clock.Node.Tick()
 	}
  
-	fmt.Printf("[LamportClock] Delete event received. Clock advanced to: %d\n", clockValue)
+	slog.Info("Delete event received", "lamport_clock", clockValue)
 
 	fileID, err := strconv.ParseUint(fileIDStr, 10, 32)
 	if err != nil {
@@ -77,8 +77,8 @@ func DeleteFile(c *gin.Context) {
 		return
 	}
 
-	if err := os.Remove(file.FilePath); err != nil {
-		fmt.Println("Warning: could not delete file from disk:", err)
+	if err := storage.FS.Delete(file.FilePath); err != nil {
+		slog.Warn("Could not delete file from disk", "error", err, "path", file.FilePath)
 	}
 
 	// Delete the DB record

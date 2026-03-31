@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"os"
 	"time"
 
@@ -9,6 +9,7 @@ import (
 	controllers "github.com/DS_node/Controllers"
 	initializers "github.com/DS_node/Initializers"
 	"github.com/DS_node/election"
+	"github.com/DS_node/middleware"
 	"github.com/DS_node/migrate"
 	"github.com/DS_node/models"
 	"github.com/gin-gonic/gin"
@@ -22,7 +23,7 @@ func init() {
 
 	// Initial sync at startup
 	if err := clock.NTP.Sync("pool.ntp.org"); err != nil {
-		log.Printf("[NTPClock] Initial sync failed: %v", err)
+		slog.Error("Initial sync failed", "error", err, "component", "NTPClock")
 	}
 
 	// Re-sync every 10 minutes in the background
@@ -30,27 +31,29 @@ func init() {
 		ticker := time.NewTicker(10 * time.Minute)
 		for range ticker.C {
 			if err := clock.NTP.Sync("pool.ntp.org"); err != nil {
-				log.Printf("[NTPClock] Re-sync failed: %v", err)
+				slog.Error("Re-sync failed", "error", err, "component", "NTPClock")
 			}
 		}
 	}()
 
-	zkServers := []string{"172.30.112.1:2181"}
+	zkServers := []string{"127.0.0.1:2181"}
 	nodeID := os.Getenv("NODE_ID")
 	if nodeID == "" {
-		log.Fatal("NODE_ID environment variable is required")
+		slog.Error("NODE_ID environment variable is required")
+		os.Exit(1)
 	}
 
 	var err error
 	em, err = election.NewElectionManager(zkServers, nodeID)
 	if err != nil {
-		log.Fatalf("Election manager init failed: %v", err)
+		slog.Error("Election manager init failed", "error", err)
+		os.Exit(1)
 	}
 
 	// Set callbacks to integrate with your replication/clock packages
 
 	em.SetOnBecomeLeader(func() {
-		log.Println("This node is now leader — start accepting writes")
+		slog.Info("This node is now leader — start accepting writes")
 		initializers.DB.Create(&models.ElectionEvent{
 			NodeID:    nodeID,
 			EventType: "became_leader",
@@ -59,7 +62,8 @@ func init() {
 
 	go func() {
 		if err := em.Start(); err != nil {
-			log.Fatalf("Election failed: %v", err)
+			slog.Error("Election failed", "error", err)
+			os.Exit(1)
 		}
 	}()
 }
@@ -67,14 +71,23 @@ func init() {
 func main() {
 	router := gin.Default()
 
-	router.POST("/createUser", controllers.CreateUser)
+	// Health and info endpoints (unprotected)
+	router.GET("/health/live", controllers.Live)
+	router.GET("/health/ready", controllers.Ready(em))
 
 	router.GET("/ping", controllers.PingEndPoint)
-
-	router.POST("/upload/:email", controllers.UploadMultipleFiles)
 	router.GET("/users/files/:email", controllers.GetUserFiles)
 	router.GET("/files/:id", controllers.GetFileByID)
-	router.DELETE("/files/:id", controllers.DeleteFile)
+	router.GET("/clock", controllers.GetClock)
+
+	// Write endpoints require leader status
+	writeGroup := router.Group("/")
+	writeGroup.Use(middleware.LeaderOnly(em))
+	{
+		writeGroup.POST("/createUser", controllers.CreateUser)
+		writeGroup.POST("/upload/:email", controllers.UploadMultipleFiles)
+		writeGroup.DELETE("/files/:id", controllers.DeleteFile)
+	}
 
 	// Lamport clock — lets other nodes (or a monitor) read this node's logical time
 	router.GET("/clock", controllers.GetClock)

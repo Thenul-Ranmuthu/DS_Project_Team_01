@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -27,7 +27,7 @@ func CreateUser(c *gin.Context) {
 		clockValue = clock.Node.Tick()
 	}
  
-	fmt.Printf("[LamportClock] Creating user event. Clock advanced to: %d\n", clockValue)
+	slog.Info("Creating user event", "lamport_clock", clockValue)
 
 	var user models.User
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 	"time"
 
 	clock "github.com/DS_node/Clock"
@@ -65,8 +66,26 @@ func init() {
 	}()
 }
 
+// CORSMiddleware enables CORS for the frontend origin
+func CORSMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
+	}
+}
+
 func main() {
 	router := gin.Default()
+	router.Use(CORSMiddleware())
 
 	router.POST("/createUser", controllers.CreateUser)
 
@@ -80,8 +99,48 @@ func main() {
 	// Lamport clock — lets other nodes (or a monitor) read this node's logical time
 	router.GET("/clock", controllers.GetClock)
 
+	router.POST("/upload", func(c *gin.Context) {
+		file, err := c.FormFile("file")
+		if err != nil {
+			c.String(400, "Get form err: %s", err.Error())
+			return
+		}
+		os.MkdirAll("./uploads", os.ModePerm)
+		if err := c.SaveUploadedFile(file, "./uploads/"+file.Filename); err != nil {
+			c.String(400, "Upload err: %s", err.Error())
+			return
+		}
+		c.JSON(200, gin.H{"message": "success"})
+	})
+
+	router.GET("/files", func(c *gin.Context) {
+		var fileNames []string
+		entries, _ := os.ReadDir("./uploads")
+		for _, e := range entries {
+			if !e.IsDir() {
+				fileNames = append(fileNames, e.Name())
+			}
+		}
+		if fileNames == nil {
+			fileNames = make([]string, 0)
+		}
+		c.JSON(200, fileNames)
+	})
+
+	router.GET("/download", func(c *gin.Context) {
+		fileName := c.Query("file")
+		c.File("./uploads/" + fileName)
+	})
+
+	router.GET("/status", em.HandleStatus)
+	router.POST("/shutdown", em.HandleShutdown)
+
 	router.GET("/election/status", em.HandleStatus)
 	router.POST("/election/resign", em.HandleResign)
 
-	router.Run()
+
+	router.Run(":" + config.Load().Port)
 }
+
+
+

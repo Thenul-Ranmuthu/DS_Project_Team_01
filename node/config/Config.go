@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 type Config struct {
 	NodeID    string
@@ -10,7 +13,7 @@ type Config struct {
 }
 
 func Load() Config {
-	zk := os.Getenv("ZK_SERVERS")
+	zk := strings.TrimSpace(os.Getenv("ZK_SERVERS"))
 	if zk == "" {
 		zk = "172.30.112.1:2181" // Default IP
 	} else if zk == "local" {
@@ -18,9 +21,10 @@ func Load() Config {
 	}
 
 	return Config{
-		NodeID:    os.Getenv("NODE_ID"),
-		Port:      os.Getenv("PORT"),
+		NodeID:    strings.TrimSpace(os.Getenv("NODE_ID")),
+		Port:      strings.TrimSpace(os.Getenv("PORT")),
 		ZKServers: []string{zk},
 	}
 }
+
 

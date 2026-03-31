@@ -32,9 +32,14 @@ cd ..
 
 echo.
 echo ====================================================
-echo [STEP 3] Starting Backend node in new window
+echo [STEP 3] Starting 4 Backend nodes in new windows
 echo ====================================================
-start "Distributed Storage - Backend" cmd /k "cd node && server.exe"
+start "Distributed Storage - Node 1 (8000)" cmd /k "cd node && set "PORT=8000" && set "NODE_ID=node_1" && server.exe"
+start "Distributed Storage - Node 2 (8001)" cmd /k "cd node && set "PORT=8001" && set "NODE_ID=node_2" && server.exe"
+start "Distributed Storage - Node 3 (8002)" cmd /k "cd node && set "PORT=8002" && set "NODE_ID=node_3" && server.exe"
+start "Distributed Storage - Node 4 (8003)" cmd /k "cd node && set "PORT=8003" && set "NODE_ID=node_4" && server.exe"
+
+
 
 echo.
 echo ====================================================

@@ -2,12 +2,12 @@ package main
 
 import (
 	"log"
-	"os"
 	"time"
 
 	clock "github.com/DS_node/Clock"
 	controllers "github.com/DS_node/Controllers"
 	initializers "github.com/DS_node/Initializers"
+	"github.com/DS_node/config"
 	"github.com/DS_node/election"
 	"github.com/DS_node/migrate"
 	"github.com/DS_node/models"
@@ -35,8 +35,9 @@ func init() {
 		}
 	}()
 
-	zkServers := []string{"172.30.112.1:2181"}
-	nodeID := os.Getenv("NODE_ID")
+	cfg := config.Load()
+	zkServers := cfg.ZKServers
+	nodeID := cfg.NodeID
 	if nodeID == "" {
 		log.Fatal("NODE_ID environment variable is required")
 	}

@@ -10,9 +10,17 @@ type Config struct {
 }
 
 func Load() Config {
+	zk := os.Getenv("ZK_SERVERS")
+	if zk == "" {
+		zk = "172.30.112.1:2181" // Default IP
+	} else if zk == "local" {
+		zk = "localhost:2181"
+	}
+
 	return Config{
-		NodeID:    os.Getenv("NODE_ID"),          // e.g. "node-5050"
-		Port:      os.Getenv("PORT"),             // e.g. "5050"
-		ZKServers: []string{"172.30.112.1:8080"}, // same for all nodes
+		NodeID:    os.Getenv("NODE_ID"),
+		Port:      os.Getenv("PORT"),
+		ZKServers: []string{zk},
 	}
 }
+

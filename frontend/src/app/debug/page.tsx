@@ -4,10 +4,13 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 const NODES = [
-    { id: "NODE_01", url: "http://localhost:8000" },
-    { id: "NODE_02", url: "http://localhost:8001" },
-    { id: "NODE_03", url: "http://localhost:8002" },
-    { id: "NODE_04", url: "http://localhost:8003" },
+    { id: "node_1", url: "http://localhost:8000" },
+    { id: "node_2", url: "http://localhost:8001" },
+    { id: "node_3", url: "http://localhost:8002" },
+    { id: "node_4", url: "http://localhost:8003" },
+    { id: "node_5", url: "http://localhost:8004" },
+    { id: "node_6", url: "http://localhost:8005" },
+    { id: "node_7", url: "http://localhost:8006" },
 ];
 
 export default function DebugPage() {
@@ -15,9 +18,23 @@ export default function DebugPage() {
     const [loading, setLoading] = useState(true);
 
     const fetchStats = async () => {
+        let orchestratorStatus: any = {};
+        try {
+            const res = await fetch("http://localhost:9999/status");
+            if (res.ok) orchestratorStatus = await res.json();
+        } catch (e) {
+            console.error("Orchestrator offline");
+        }
+
         const stats: any = {};
         await Promise.all(
             NODES.map(async (node) => {
+                // If orchestrator explicitly says it is stopped, don't poll it (silences console errors)
+                if (orchestratorStatus[node.id] === "STOPPED") {
+                    stats[node.id] = { state: "OFFLINE" };
+                    return;
+                }
+
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 1000);
                 try {
@@ -44,13 +61,22 @@ export default function DebugPage() {
         return () => clearInterval(interval);
     }, []);
 
-    const shutdownNode = async (url: string) => {
+    const shutdownNode = async (id: string) => {
         if (!confirm("Confirm remote shutdown and quorum reduction?")) return;
         try {
-            await fetch(`${url}/shutdown`, { method: "POST" });
+            await fetch(`http://localhost:9999/shutdown/${id}`, { method: "POST" });
             fetchStats();
         } catch (e) {
-            alert("Execution failed: Node already offline.");
+            alert("Execution failed: Orchestrator unreachable.");
+        }
+    };
+
+    const recoverNode = async (id: string) => {
+        try {
+            await fetch(`http://localhost:9999/recover/${id}`, { method: "POST" });
+            fetchStats();
+        } catch (e) {
+            alert("Execution failed: Orchestrator unreachable.");
         }
     };
 
@@ -100,7 +126,7 @@ export default function DebugPage() {
                             <div
                                 key={node.id}
                                 className={`group relative glass rounded-3xl p-6 flex flex-col justify-between h-auto min-h-[550px] transition-all duration-300 ${isOffline
-                                    ? 'opacity-30 grayscale border-red-500/10'
+                                    ? 'border-red-500/10'
                                     : 'hover:border-blue-500/40 hover:-translate-y-2'
                                     }`}
                                 style={{ animationDelay: `${i * 150}ms` }}
@@ -110,7 +136,7 @@ export default function DebugPage() {
                                     <div className={`absolute top-0 right-0 w-32 h-32 blur-3xl rounded-full opacity-10 transition-opacity group-hover:opacity-30 pointer-events-none ${isLeader ? 'bg-blue-500' : 'bg-emerald-500'}`}></div>
                                 )}
 
-                                <div>
+                                <div className={isOffline ? "opacity-30 grayscale" : ""}>
                                     <div className="flex justify-between items-start mb-10">
                                         <div className="space-y-1">
                                             <h3 className="text-2xl font-display font-black italic uppercase tracking-tighter opacity-80">{node.id}</h3>
@@ -178,19 +204,28 @@ export default function DebugPage() {
                                     </div>
                                 </div>
 
-                                <div className="mt-8">
+                                <div className="mt-8 space-y-3">
                                     {!isOffline ? (
                                         <button
-                                            onClick={() => shutdownNode(node.url)}
+                                            onClick={() => shutdownNode(node.id)}
                                             className="w-full h-11 rounded-2xl border border-red-500/20 hover:border-red-500 hover:bg-red-500 text-red-500 hover:text-white text-[11px] font-display font-black uppercase tracking-[0.3em] transition-all shadow-xl shadow-red-500/5 group/btn overflow-hidden relative"
                                         >
                                             <span className="relative z-10 transition-transform group-hover/btn:-translate-y-px">TERMINATE PROCESS</span>
                                             <div className="absolute inset-x-0 bottom-0 h-0.5 bg-black/20 origin-left scale-x-0 group-hover/btn:scale-x-100 transition-transform duration-700"></div>
                                         </button>
                                     ) : (
-                                        <div className="text-center p-4 border border-dashed border-white/5 rounded-2xl flex flex-col gap-1 cursor-not-allowed">
-                                            <span className="text-[8px] font-mono uppercase font-black opacity-10">Process Nullified</span>
-                                            <span className="text-[7px] italic font-mono opacity-5">Awaiting physical restart...</span>
+                                        <div className="space-y-3">
+                                            <div className="text-center p-4 border border-dashed border-white/5 rounded-2xl flex flex-col gap-1 cursor-not-allowed">
+                                                <span className="text-[8px] font-mono uppercase font-black opacity-10">Process Nullified</span>
+                                                <span className="text-[7px] italic font-mono opacity-5">Awaiting physical restart...</span>
+                                            </div>
+                                            <button
+                                                onClick={() => recoverNode(node.id)}
+                                                className="w-full h-11 rounded-2xl border border-emerald-500 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-500 hover:text-white text-[11px] font-display font-black uppercase tracking-[0.3em] transition-all shadow-xl shadow-emerald-500/20 group/btn overflow-hidden relative"
+                                            >
+                                                <span className="relative z-10 transition-transform group-hover/btn:-translate-y-px">RECOVER PROCESS</span>
+                                                <div className="absolute inset-x-0 bottom-0 h-0.5 bg-black/20 origin-left scale-x-0 group-hover/btn:scale-x-100 transition-transform duration-700"></div>
+                                            </button>
                                         </div>
                                     )}
                                 </div>

@@ -223,6 +223,14 @@ func (em *ElectionManager) GetEvents() []string {
 	return em.events
 }
 
+func (em *ElectionManager) GetPeerCount() int {
+	children, _, err := em.conn.Children(zkElectionPath)
+	if err != nil {
+		return 0
+	}
+	return len(children)
+}
+
 func getSeqNumber(name string) string {
 
 	return name[len(name)-10:]

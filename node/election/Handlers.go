@@ -9,7 +9,7 @@ import (
 )
 
 // GET /status (and /election/status)
-func (em *ElectionManager) HandleStatus(c *gin.Context) {
+func (em *ElectionManager) HandleStatus(c *gin.Context, applied int64, term int64, peers int) {
 	state := "Follower"
 	if em.IsLeader() {
 		state = "Leader"
@@ -18,15 +18,15 @@ func (em *ElectionManager) HandleStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"node_id":       em.nodeID,
 		"state":         state,
-		"applied_index": 18,
-		"commit_index":  18,
-		"term":          11,
-		"num_peers":     3,
+		"applied_index": applied,
+		"commit_index":  applied,
+		"term":          term,
+		"num_peers":     peers,
 		"events":        em.GetEvents(),
 	})
 }
 
-// POST /election/resign  — useful for testing failover
+// POST /election/resign — useful for testing failover
 func (em *ElectionManager) HandleResign(c *gin.Context) {
 	if !em.IsLeader() {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "not the leader"})
@@ -46,5 +46,3 @@ func (em *ElectionManager) HandleShutdown(c *gin.Context) {
 		os.Exit(0)
 	}()
 }
-
-

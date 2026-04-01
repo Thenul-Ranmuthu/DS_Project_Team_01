@@ -5,12 +5,13 @@ setlocal
 if exist "node\server.exe" del "node\server.exe"
 
 echo ====================================================
-echo [STEP 1] Building Backend (Go)
+echo [STEP 1] Building Backend and Orchestrator
 echo ====================================================
 cd node
 go build -o server.exe main.go
+go build -o orchestrator.exe orchestrator\main.go
 if %errorlevel% neq 0 (
-    echo [ERROR] Backend build failed!
+    echo [ERROR] Build failed!
     pause
     exit /b 1
 )
@@ -18,10 +19,9 @@ cd ..
 
 echo.
 echo ====================================================
-echo [STEP 2] Building Frontend (Vite/React)
+echo [STEP 2] Building Frontend (Next.js)
 echo ====================================================
 cd frontend
-call npm install
 call npm run build
 if %errorlevel% neq 0 (
     echo [ERROR] Frontend build failed!
@@ -32,20 +32,15 @@ cd ..
 
 echo.
 echo ====================================================
-echo [STEP 3] Starting 4 Backend nodes in new windows
+echo [STEP 3] Starting Orchestrator (Manages 7 Nodes)
 echo ====================================================
-start "Distributed Storage - Node 1 (8000)" cmd /k "cd node && set "PORT=8000" && set "NODE_ID=node_1" && server.exe"
-start "Distributed Storage - Node 2 (8001)" cmd /k "cd node && set "PORT=8001" && set "NODE_ID=node_2" && server.exe"
-start "Distributed Storage - Node 3 (8002)" cmd /k "cd node && set "PORT=8002" && set "NODE_ID=node_3" && server.exe"
-start "Distributed Storage - Node 4 (8003)" cmd /k "cd node && set "PORT=8003" && set "NODE_ID=node_4" && server.exe"
-
-
+start "Distributed Storage - Orchestrator" cmd /k "cd node && orchestrator.exe"
 
 echo.
 echo ====================================================
-echo [STEP 4] Waiting 20 seconds for initialization
+echo [STEP 4] Waiting 30 seconds for 7 nodes to initialize
 echo ====================================================
-timeout /t 20 /nobreak
+timeout /t 30 /nobreak
 
 echo.
 echo ====================================================
@@ -65,18 +60,19 @@ echo ====================================================
 echo [SHUTDOWN SEQUENCE INITIATED]
 echo ====================================================
 
-echo [1/2] Shutting down Frontend...
+echo [1/3] Shutting down Frontend...
 taskkill /F /IM node.exe /T > nul 2>&1
 echo [OK] Frontend killed.
 
 echo.
-echo [Wait 5 seconds before killing backend...]
-timeout /t 5 /nobreak
+echo [2/3] Shutting down Backend Nodes...
+taskkill /F /IM server.exe /T > nul 2>&1
+echo [OK] Backend nodes killed.
 
 echo.
-echo [2/2] Shutting down Backend...
-taskkill /F /IM server.exe /T > nul 2>&1
-echo [OK] Backend killed.
+echo [3/3] Shutting down Orchestrator...
+taskkill /F /IM orchestrator.exe /T > nul 2>&1
+echo [OK] Orchestrator killed.
 
 echo.
 echo ====================================================

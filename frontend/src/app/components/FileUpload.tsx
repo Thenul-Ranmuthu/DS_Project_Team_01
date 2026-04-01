@@ -7,6 +7,9 @@ const BACKEND_NODES = [
     "http://localhost:8001",
     "http://localhost:8002",
     "http://localhost:8003",
+    "http://localhost:8004",
+    "http://localhost:8005",
+    "http://localhost:8006",
 ];
 
 export default function FileUpload() {

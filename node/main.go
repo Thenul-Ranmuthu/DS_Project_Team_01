@@ -286,10 +286,31 @@ func main() {
 		c.File("./uploads/" + fileName)
 	})
 
-	router.GET("/status", em.HandleStatus)
+	router.GET("/status", func(c *gin.Context) {
+		AppMetrics.RLock()
+		term := AppMetrics.LeaderChanges
+		AppMetrics.RUnlock()
+
+		entries, _ := os.ReadDir("./uploads")
+		applied := int64(len(entries))
+		peers := em.GetPeerCount()
+
+		em.HandleStatus(c, applied, term, peers)
+	})
+
 	router.POST("/shutdown", em.HandleShutdown)
 
-	router.GET("/election/status", em.HandleStatus)
+	router.GET("/election/status", func(c *gin.Context) {
+		AppMetrics.RLock()
+		term := AppMetrics.LeaderChanges
+		AppMetrics.RUnlock()
+
+		entries, _ := os.ReadDir("./uploads")
+		applied := int64(len(entries))
+		peers := em.GetPeerCount()
+
+		em.HandleStatus(c, applied, term, peers)
+	})
 	router.POST("/election/resign", em.HandleResign)
 
 

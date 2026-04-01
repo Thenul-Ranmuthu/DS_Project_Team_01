@@ -28,7 +28,9 @@ type ElectionManager struct {
 
 	onBecomeLeader  func()                   // callback: called when this node wins
 	onLeaderChanged func(newLeaderID string) // callback: called when leader changes
+	events          []string                 // recent cluster events
 }
+
 
 func NewElectionManager(zkServers []string, nodeID string) (*ElectionManager, error) {
 	conn, _, err := zk.Connect(zkServers, zkTimeout)
@@ -60,9 +62,10 @@ func (em *ElectionManager) Start() error {
 		return fmt.Errorf("failed to create election znode: %w", err)
 	}
 	em.znodePath = znodePath
-	log.Printf("[%s] Registered znode: %s", em.nodeID, znodePath)
+	em.LogEvent(fmt.Sprintf("Registered znode: %s", znodePath))
 
 	go em.watchLeader()
+
 
 	return em.runElection()
 }
@@ -88,11 +91,16 @@ func (em *ElectionManager) runElection() error {
 			em.leaderID = em.nodeID
 			em.mu.Unlock()
 
-			log.Printf("[%s] Became LEADER", em.nodeID)
+			em.LogEvent("Became LEADER")
 			if em.onBecomeLeader != nil {
 				em.onBecomeLeader()
 			}
+			if em.onLeaderChanged != nil {
+				em.onLeaderChanged(em.nodeID)
+			}
 			return nil
+
+
 		}
 
 		// Find our predecessor to watch
@@ -109,9 +117,13 @@ func (em *ElectionManager) runElection() error {
 			em.isLeader = false
 			em.leaderID = string(leaderData)
 			em.mu.Unlock()
+			if em.onLeaderChanged != nil {
+				em.onLeaderChanged(string(leaderData))
+			}
 		}
 
 		log.Printf("[%s] Follower. Watching predecessor: %s", em.nodeID, predecessor)
+
 
 		// Block until predecessor disappears
 		exists, _, watchCh, err := em.conn.ExistsW(predecessor)
@@ -125,8 +137,9 @@ func (em *ElectionManager) runElection() error {
 
 		// Wait for predecessor deletion event
 		event := <-watchCh
-		log.Printf("[%s] Watch fired: %v — re-running election", em.nodeID, event.Type)
+		em.LogEvent(fmt.Sprintf("Watch fired: %v — re-running election", event.Type))
 		// Loop back and re-check
+
 	}
 }
 
@@ -183,7 +196,35 @@ func (em *ElectionManager) SetOnBecomeLeader(fn func()) {
 	em.onBecomeLeader = fn
 }
 
+func (em *ElectionManager) SetOnLeaderChanged(fn func(newLeader string)) {
+	em.onLeaderChanged = fn
+}
+
+func (em *ElectionManager) IsConnected() bool {
+	state := em.conn.State()
+	return state == zk.StateHasSession || state == zk.StateConnected
+}
+
+func (em *ElectionManager) LogEvent(msg string) {
+	em.mu.Lock()
+	defer em.mu.Unlock()
+	timestamp := time.Now().Format("15:04:05")
+	fullMsg := fmt.Sprintf("[%s] %s", timestamp, msg)
+	em.events = append(em.events, fullMsg)
+	if len(em.events) > 10 {
+		em.events = em.events[1:]
+	}
+	log.Printf("[%s] %s", em.nodeID, msg)
+}
+
+func (em *ElectionManager) GetEvents() []string {
+	em.mu.RLock()
+	defer em.mu.RUnlock()
+	return em.events
+}
+
 func getSeqNumber(name string) string {
+
 	return name[len(name)-10:]
 }
 
@@ -213,12 +254,17 @@ func (em *ElectionManager) watchLeader() {
 		em.leaderID = string(data)
 		em.mu.Unlock()
 
-		log.Printf("[%s] Leader is: %s", em.nodeID, string(data))
+		if em.onLeaderChanged != nil {
+			em.onLeaderChanged(string(data))
+		}
+
+		em.LogEvent(fmt.Sprintf("Leader updated: %s", string(data)))
 
 		// Block until the leader znode changes or disappears
 		<-watchCh
 
-		log.Printf("[%s] Leader znode changed — re-checking leader", em.nodeID)
+		em.LogEvent("Leader znode changed — re-checking leader")
 		// Loop back and re-read who the new leader is
 	}
 }
+

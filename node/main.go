@@ -1,8 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	clock "github.com/DS_node/Clock"
@@ -15,16 +19,29 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var em *election.ElectionManager
+var (
+	em         *election.ElectionManager
+	AppMetrics struct {
+		sync.RWMutex
+		DBLatencyMs    int64
+		UploadFailures int64
+		LeaderChanges  int64
+		DBReconnects   int64
+	}
+)
 
 func init() {
+
 	initializers.LoadEnvVaribles()
 	migrate.MigrateDB()
 
 	// Initial sync at startup
 	if err := clock.NTP.Sync("pool.ntp.org"); err != nil {
 		log.Printf("[NTPClock] Initial sync failed: %v", err)
+	} else {
+		log.Println("[NTPClock] Initial sync successful")
 	}
+
 
 	// Re-sync every 10 minutes in the background
 	go func() {
@@ -32,9 +49,12 @@ func init() {
 		for range ticker.C {
 			if err := clock.NTP.Sync("pool.ntp.org"); err != nil {
 				log.Printf("[NTPClock] Re-sync failed: %v", err)
+			} else {
+				log.Println("[NTPClock] Background sync successful")
 			}
 		}
 	}()
+
 
 	cfg := config.Load()
 	zkServers := cfg.ZKServers
@@ -52,12 +72,59 @@ func init() {
 	// Set callbacks to integrate with your replication/clock packages
 
 	em.SetOnBecomeLeader(func() {
-		log.Println("This node is now leader — start accepting writes")
+		em.LogEvent("Confirmed: Node is now LEADER — enabling write access")
 		initializers.DB.Create(&models.ElectionEvent{
 			NodeID:    nodeID,
 			EventType: "became_leader",
 		})
 	})
+
+
+	em.SetOnLeaderChanged(func(newLeaderID string) {
+		AppMetrics.Lock()
+		AppMetrics.LeaderChanges++
+		changes := AppMetrics.LeaderChanges
+		AppMetrics.Unlock()
+		
+		em.LogEvent(fmt.Sprintf("Leader changed to %s. Total changes: %d", newLeaderID, changes))
+		if changes > 5 {
+			em.LogEvent("[ALERT] Leader changes are happening too often! Possible network flap or ZK overload.")
+		}
+	})
+
+
+	// Background metrics loop for DB latency & reconnect tracking
+	go func() {
+		dbStatusOk := true
+		for {
+			time.Sleep(5 * time.Second)
+			sqlDB, err := initializers.DB.DB()
+			if err != nil {
+				continue
+			}
+
+			start := time.Now()
+			pingErr := sqlDB.Ping()
+			latency := time.Since(start).Milliseconds()
+
+			AppMetrics.Lock()
+			AppMetrics.DBLatencyMs = latency
+			if pingErr != nil {
+				if dbStatusOk {
+					dbStatusOk = false
+					AppMetrics.DBReconnects++
+					em.LogEvent(fmt.Sprintf("[ALERT] DB connection lost! Total reconnects: %d", AppMetrics.DBReconnects))
+				}
+			} else {
+				if !dbStatusOk {
+					em.LogEvent("DB connection recovered.")
+					dbStatusOk = true
+				}
+			}
+
+			AppMetrics.Unlock()
+		}
+	}()
 
 	go func() {
 		if err := em.Start(); err != nil {
@@ -65,6 +132,7 @@ func init() {
 		}
 	}()
 }
+
 
 // CORSMiddleware enables CORS for the frontend origin
 func CORSMiddleware() gin.HandlerFunc {
@@ -83,30 +151,104 @@ func CORSMiddleware() gin.HandlerFunc {
 	}
 }
 
+// LeaderOnly middleware ensures only the leader processes write requests.
+// If the node is a follower, it returns 423 with the current leader's info.
+func LeaderOnly() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !em.IsLeader() {
+			leaderID := em.LeaderID()
+			
+			// Map node_1 -> 9000, node_2 -> 9001 (so frontend can -1000 to get 8000 series)
+			port := 9000
+			if strings.HasPrefix(leaderID, "node_") {
+				idxStr := strings.TrimPrefix(leaderID, "node_")
+				if idx, err := strconv.Atoi(idxStr); err == nil {
+					port = 8000 + (idx - 1) + 1000
+				}
+			}
+
+			c.JSON(423, gin.H{
+				"error":  "Consensus error: write operation must be performed on leader.",
+				"leader": fmt.Sprintf("localhost:%d", port),
+			})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+
 func main() {
 	router := gin.Default()
 	router.Use(CORSMiddleware())
 
-	router.POST("/createUser", controllers.CreateUser)
+	router.POST("/createUser", LeaderOnly(), controllers.CreateUser)
 
 	router.GET("/ping", controllers.PingEndPoint)
 
-	router.POST("/upload/:email", controllers.UploadMultipleFiles)
+	// Observability & Monitoring
+	router.GET("/health/live", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok", "message": "process is alive"})
+	})
+
+	router.GET("/health/ready", func(c *gin.Context) {
+		dbStatus := "ok"
+		sqlDB, err := initializers.DB.DB()
+		if err != nil || sqlDB.Ping() != nil {
+			dbStatus = "error"
+		}
+		
+		zkStatus := "ok"
+		if !em.IsConnected() {
+			zkStatus = "error"
+		}
+
+		status := 200
+		if dbStatus == "error" || zkStatus == "error" {
+			status = 503
+		}
+
+		c.JSON(status, gin.H{
+			"db": dbStatus,
+			"zk": zkStatus,
+			"ready": status == 200,
+		})
+	})
+
+	router.GET("/metrics", func(c *gin.Context) {
+		AppMetrics.RLock()
+		defer AppMetrics.RUnlock()
+		c.JSON(200, gin.H{
+			"db_latency_ms":    AppMetrics.DBLatencyMs,
+			"upload_failures":  AppMetrics.UploadFailures,
+			"leader_changes":   AppMetrics.LeaderChanges,
+			"db_reconnects":    AppMetrics.DBReconnects,
+		})
+	})
+
+	router.POST("/upload/:email", LeaderOnly(), controllers.UploadMultipleFiles)
 	router.GET("/users/files/:email", controllers.GetUserFiles)
 	router.GET("/files/:id", controllers.GetFileByID)
-	router.DELETE("/files/:id", controllers.DeleteFile)
+	router.DELETE("/files/:id", LeaderOnly(), controllers.DeleteFile)
 
 	// Lamport clock — lets other nodes (or a monitor) read this node's logical time
 	router.GET("/clock", controllers.GetClock)
 
-	router.POST("/upload", func(c *gin.Context) {
+	router.POST("/upload", LeaderOnly(), func(c *gin.Context) {
 		file, err := c.FormFile("file")
 		if err != nil {
+			AppMetrics.Lock()
+			AppMetrics.UploadFailures++
+			AppMetrics.Unlock()
 			c.String(400, "Get form err: %s", err.Error())
 			return
 		}
 		os.MkdirAll("./uploads", os.ModePerm)
 		if err := c.SaveUploadedFile(file, "./uploads/"+file.Filename); err != nil {
+			AppMetrics.Lock()
+			AppMetrics.UploadFailures++
+			AppMetrics.Unlock()
 			c.String(400, "Upload err: %s", err.Error())
 			return
 		}
@@ -114,17 +256,29 @@ func main() {
 	})
 
 	router.GET("/files", func(c *gin.Context) {
-		var fileNames []string
+		type FileInfo struct {
+			Name    string `json:"name"`
+			Size    int64  `json:"size"`
+			ModTime string `json:"modTime"`
+		}
+		var files []FileInfo
 		entries, _ := os.ReadDir("./uploads")
 		for _, e := range entries {
 			if !e.IsDir() {
-				fileNames = append(fileNames, e.Name())
+				info, err := e.Info()
+				if err == nil {
+					files = append(files, FileInfo{
+						Name:    e.Name(),
+						Size:    info.Size(),
+						ModTime: info.ModTime().Format(time.RFC3339),
+					})
+				}
 			}
 		}
-		if fileNames == nil {
-			fileNames = make([]string, 0)
+		if files == nil {
+			files = make([]FileInfo, 0)
 		}
-		c.JSON(200, fileNames)
+		c.JSON(200, files)
 	})
 
 	router.GET("/download", func(c *gin.Context) {

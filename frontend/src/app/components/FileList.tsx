@@ -9,11 +9,26 @@ const BACKEND_NODES = [
     "http://localhost:8003",
 ];
 
+interface FileInfo {
+    name: string;
+    size: number;
+    modTime: string;
+}
+
 export default function FileList() {
-    const [files, setFiles] = useState<string[]>([]);
+    const [files, setFiles] = useState<FileInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [activeNode, setActiveNode] = useState(BACKEND_NODES[0]);
+
+    const formatBytes = (bytes: number, decimals = 2) => {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    };
 
     const fetchFiles = async () => {
         let success = false;
@@ -25,7 +40,16 @@ export default function FileList() {
                 clearTimeout(timeoutId);
                 if (!res.ok) continue;
                 const data = await res.json();
-                setFiles(data || []);
+                
+                // Map the data to ensure it's in the correct object format even if the backend returns strings
+                    const normalizedFiles = (data || []).map((f: any) => {
+                    if (typeof f === 'string') {
+                        return { name: f, size: 0, modTime: new Date().toISOString() };
+                    }
+                    return f;
+                });
+
+                setFiles(normalizedFiles);
                 setActiveNode(nodeUrl);
                 success = true;
                 break;
@@ -80,46 +104,66 @@ export default function FileList() {
 
     return (
         <ul className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in duration-500">
-            {files.map((filename, i) => (
-                <li
-                    key={filename}
-                    className="group relative h-40 flex flex-col justify-between p-6 overflow-hidden rounded-3xl border border-white/5 bg-white/2 hover:border-blue-500/50 hover:bg-white/5 transition-all duration-300"
-                    style={{ animationDelay: `${i * 100}ms` }}
-                >
-                    <div className="flex items-start justify-between">
-                        <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/5 flex items-center justify-center transition-all group-hover:scale-110 group-hover:bg-blue-500/10 group-hover:border-blue-500/20">
-                            <svg className="w-6 h-6 opacity-40 group-hover:opacity-100 group-hover:text-blue-500 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                        </div>
-                        <div className="flex flex-col items-end opacity-20 group-hover:opacity-40 transition-opacity text-[10px] font-mono font-bold uppercase tracking-widest leading-none">
-                            <span>{activeNode.replace('http://localhost:', 'NODE:')}</span>
-                            <span className="mt-1">BLOCK-SYNC</span>
-                        </div>
-                    </div>
+            {files.map((file, i) => {
+                const name = file.name || "Unknown File";
+                const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(name);
+                const downloadUrl = `${activeNode}/download?file=${encodeURIComponent(name)}`;
+                const timestamp = file.modTime ? new Date(file.modTime).toLocaleString() : "Unknown Date";
 
-                    <div>
-                        <div className="mb-4">
-                            <span className="block font-display font-black tracking-tight text-white/90 group-hover:text-white truncate pr-4 text-lg">
-                                {filename}
-                            </span>
-                            <div className="flex gap-2 items-center opacity-30 mt-1">
-                                <div className="w-1 h-1 rounded-full bg-blue-500"></div>
-                                <span className="text-[9px] font-mono tracking-widest font-black uppercase">Consensus Proven Asset</span>
+                return (
+                    <li
+                        key={`${file.name}-${i}`}
+                        className="group relative flex flex-col justify-between p-6 overflow-hidden rounded-3xl border border-white/5 bg-white/2 hover:border-blue-500/50 hover:bg-white/5 transition-all duration-300"
+                        style={{ animationDelay: `${i * 100}ms` }}
+                    >
+                        <div className="flex items-start justify-between mb-4">
+                            <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/5 flex items-center justify-center overflow-hidden transition-all group-hover:scale-110 group-hover:bg-blue-500/10 group-hover:border-blue-500/20">
+                                {isImage ? (
+                                    <img src={downloadUrl} alt={name} className="w-full h-full object-cover" />
+                                ) : (
+                                    <svg className="w-8 h-8 opacity-40 group-hover:opacity-100 group-hover:text-blue-500 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                                )}
+                            </div>
+                            <div className="flex flex-col items-end opacity-20 group-hover:opacity-40 transition-opacity text-[10px] font-mono font-bold uppercase tracking-widest leading-none text-right">
+                                <span>{activeNode.replace('http://localhost:', 'NODE:')}</span>
+                                <span className="mt-1">BLOCK-SYNC</span>
+                                <span className="mt-2 text-blue-500 font-bold">{name.split('.').pop()?.toUpperCase() || "????"}</span>
                             </div>
                         </div>
 
-                        <a
-                            href={`${activeNode}/download?file=${encodeURIComponent(filename)}`}
-                            className="absolute bottom-6 right-6 px-5 py-2 overflow-hidden rounded-xl bg-white/5 border border-white/10 text-[9px] font-display font-black uppercase tracking-widest text-white/40 hover:text-white hover:bg-blue-500 hover:border-blue-500 transition-all shadow-xl shadow-black/20"
-                            download
-                        >
-                            Retrieve Asset
-                        </a>
-                    </div>
+                        <div>
+                            <div className="mb-4">
+                                <span className="block font-display font-black tracking-tight text-white/90 group-hover:text-white truncate pr-4 text-lg">
+                                    {name}
+                                </span>
+                                <div className="space-y-1 mt-2">
+                                    <div className="flex gap-2 items-center opacity-40">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
+                                        <span className="text-[10px] font-mono tracking-widest font-bold uppercase">{formatBytes(file.size || 0)}</span>
+                                    </div>
+                                    <div className="flex gap-2 items-center opacity-40">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
+                                        <span className="text-[10px] font-mono tracking-widest font-medium uppercase">{timestamp}</span>
+                                    </div>
+                                </div>
+                            </div>
 
-                    {/* Visual Hover Decoration */}
-                    <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 blur-3xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
-                </li>
-            ))}
+                            <a
+                                href={downloadUrl}
+                                className="inline-block px-5 py-2 overflow-hidden rounded-xl bg-white/5 border border-white/10 text-[10px] font-display font-black uppercase tracking-widest text-white/40 hover:text-white hover:bg-blue-500 hover:border-blue-500 transition-all shadow-xl shadow-black/20"
+                                download
+                            >
+                                Retrieve Asset
+                            </a>
+                        </div>
+
+                        {/* Visual Hover Decoration */}
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 blur-3xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+                    </li>
+                );
+            })}
+
         </ul>
     );
 }
+

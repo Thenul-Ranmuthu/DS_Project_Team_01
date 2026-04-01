@@ -59,7 +59,7 @@ export default function DebugPage() {
             {/* Ambient background glow */}
             <div className="fixed -top-[20%] -left-[20%] w-[60%] h-[60%] bg-blue-900/10 blur-[120px] rounded-full opacity-50 pointer-events-none"></div>
 
-            <div className="max-w-7xl mx-auto space-y-16 animate-in fade-in slide-in-from-bottom-2 duration-1000">
+            <div className="max-w-[1600px] mx-auto space-y-16 animate-in fade-in slide-in-from-bottom-2 duration-1000">
                 <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-12 border-b border-white/10 pb-12 relative">
                     <div className="space-y-4">
                         <Link href="/" className="group inline-flex items-center gap-2 text-[10px] font-mono font-black uppercase tracking-[0.3em] opacity-30 hover:opacity-100 hover:text-blue-500 transition-all">
@@ -99,9 +99,9 @@ export default function DebugPage() {
                         return (
                             <div
                                 key={node.id}
-                                className={`group relative glass rounded-3xl p-8 flex flex-col justify-between h-[480px] transition-all duration-300 ${isOffline
-                                        ? 'opacity-30 grayscale border-red-500/10'
-                                        : 'hover:border-blue-500/40 hover:-translate-y-2'
+                                className={`group relative glass rounded-3xl p-6 flex flex-col justify-between h-auto min-h-[550px] transition-all duration-300 ${isOffline
+                                    ? 'opacity-30 grayscale border-red-500/10'
+                                    : 'hover:border-blue-500/40 hover:-translate-y-2'
                                     }`}
                                 style={{ animationDelay: `${i * 150}ms` }}
                             >
@@ -111,58 +111,78 @@ export default function DebugPage() {
                                 )}
 
                                 <div>
-                                    <div className="flex justify-between items-start mb-12">
+                                    <div className="flex justify-between items-start mb-10">
                                         <div className="space-y-1">
                                             <h3 className="text-2xl font-display font-black italic uppercase tracking-tighter opacity-80">{node.id}</h3>
-                                            <p className="text-[8px] font-mono opacity-20 tracking-widest uppercase">Endpoint: {node.url.replace('http://', '').replace(':', ' : ')}</p>
+                                            <p className="text-[10px] font-mono opacity-30 tracking-widest uppercase">Endpoint: {node.url.replace('http://', '').replace(':', ' : ')}</p>
                                         </div>
                                         {isLeader && (
                                             <div className="relative">
                                                 <span className="absolute -inset-1 blur bg-blue-500/40 rounded-full animate-pulse"></span>
-                                                <span className="relative bg-blue-500 text-white text-[8px] px-3 py-1 font-black uppercase rounded-full shadow-[0_0_20px_rgba(59,130,246,0.6)]">LEADER</span>
+                                                <span className="relative bg-blue-500 text-white text-[10px] px-3 py-1 font-black uppercase rounded-full shadow-[0_0_20px_rgba(59,130,246,0.6)]">LEADER</span>
                                             </div>
                                         )}
                                         {isOffline && (
-                                            <span className="bg-red-500/20 text-red-500 text-[8px] border border-red-500/30 px-3 py-1 font-black uppercase rounded-full">OFFLINE</span>
+                                            <span className="bg-red-500/20 text-red-500 text-[10px] border border-red-500/30 px-3 py-1 font-black uppercase rounded-full">OFFLINE</span>
                                         )}
                                     </div>
 
                                     <div className="space-y-6">
-                                        <div className="flex flex-col gap-1.5 font-mono text-[9px] uppercase font-black">
-                                            <span className="opacity-20 flex items-center justify-between">State Transition <span className="h-px bg-white/5 flex-1 mx-4"></span></span>
+                                        <div className="flex flex-col gap-1.5 font-mono text-[11px] uppercase font-black">
+                                            <span className="opacity-20 flex items-center justify-between">State Transition <span className="h-px bg-white/5 flex-1 mx-3"></span></span>
                                             <span className={`text-base tracking-widest ${isOffline ? 'text-red-500' : isLeader ? 'text-blue-400' : 'text-emerald-400'}`}>
                                                 {stats?.state || "DETECTING..."}
                                             </span>
                                         </div>
 
                                         {!isOffline && (
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div className="flex flex-col gap-1 bg-white/5 border border-white/5 rounded-2xl p-4 transition-all group-hover:bg-white/10">
-                                                    <span className="text-[8px] font-mono opacity-20 uppercase font-black">App Indices</span>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="flex flex-col gap-1 bg-white/5 border border-white/5 rounded-2xl p-3 transition-all group-hover:bg-white/10">
+                                                    <span className="text-[10px] font-mono opacity-30 uppercase font-black">App Indices</span>
                                                     <span className="text-lg font-display font-black tracking-tight">{stats.applied_index}</span>
                                                 </div>
-                                                <div className="flex flex-col gap-1 bg-white/5 border border-white/5 rounded-2xl p-4 transition-all group-hover:bg-white/10">
-                                                    <span className="text-[8px] font-mono opacity-20 uppercase font-black">Commit Sync</span>
+                                                <div className="flex flex-col gap-1 bg-white/5 border border-white/5 rounded-2xl p-3 transition-all group-hover:bg-white/10">
+                                                    <span className="text-[10px] font-mono opacity-30 uppercase font-black">Commit Sync</span>
                                                     <span className="text-lg font-display font-black tracking-tight">{stats.commit_index}</span>
                                                 </div>
-                                                <div className="flex flex-col gap-1 bg-white/5 border border-white/5 rounded-2xl p-4 transition-all group-hover:bg-white/10">
-                                                    <span className="text-[8px] font-mono opacity-20 uppercase font-black">Electoral Term</span>
+                                                <div className="flex flex-col gap-1 bg-white/5 border border-white/5 rounded-2xl p-3 transition-all group-hover:bg-white/10">
+                                                    <span className="text-[10px] font-mono opacity-30 uppercase font-black">Electoral Term</span>
                                                     <span className="text-lg font-display font-black tracking-tight">{stats.term}</span>
                                                 </div>
-                                                <div className="flex flex-col gap-1 bg-white/5 border border-white/5 rounded-2xl p-4 transition-all group-hover:bg-white/10">
-                                                    <span className="text-[8px] font-mono opacity-20 uppercase font-black">Cluster Peers</span>
+                                                <div className="flex flex-col gap-1 bg-white/5 border border-white/5 rounded-2xl p-3 transition-all group-hover:bg-white/10">
+                                                    <span className="text-[10px] font-mono opacity-30 uppercase font-black">Cluster Peers</span>
                                                     <span className="text-lg font-display font-black tracking-tight">{stats.num_peers}</span>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Activity Log */}
+                                        {stats?.events && stats.events.length > 0 && (
+                                            <div className="mt-6 pt-5 border-t border-white/5 space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-[11px] font-mono opacity-30 uppercase font-black">Activity Log</span>
+                                                    <div className="flex gap-1">
+                                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
+                                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" style={{ animationDelay: '200ms' }}></div>
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-3 max-h-56 overflow-y-auto pr-1.5 custom-scrollbar">
+                                                    {stats.events.slice().reverse().map((evt: string, idx: number) => (
+                                                        <div key={idx} className="text-[12px] font-mono opacity-60 hover:opacity-100 transition-opacity border-l border-white/10 pl-3 py-1 leading-relaxed tracking-tight underline-offset-2 font-medium">
+                                                            {evt}
+                                                        </div>
+                                                    ))}
                                                 </div>
                                             </div>
                                         )}
                                     </div>
                                 </div>
 
-                                <div className="mt-12">
+                                <div className="mt-8">
                                     {!isOffline ? (
                                         <button
                                             onClick={() => shutdownNode(node.url)}
-                                            className="w-full h-12 rounded-2xl border border-red-500/20 hover:border-red-500 hover:bg-red-500 text-red-500 hover:text-white text-[9px] font-display font-black uppercase tracking-[0.35em] transition-all shadow-xl shadow-red-500/5 group/btn overflow-hidden relative"
+                                            className="w-full h-11 rounded-2xl border border-red-500/20 hover:border-red-500 hover:bg-red-500 text-red-500 hover:text-white text-[11px] font-display font-black uppercase tracking-[0.3em] transition-all shadow-xl shadow-red-500/5 group/btn overflow-hidden relative"
                                         >
                                             <span className="relative z-10 transition-transform group-hover/btn:-translate-y-px">TERMINATE PROCESS</span>
                                             <div className="absolute inset-x-0 bottom-0 h-0.5 bg-black/20 origin-left scale-x-0 group-hover/btn:scale-x-100 transition-transform duration-700"></div>

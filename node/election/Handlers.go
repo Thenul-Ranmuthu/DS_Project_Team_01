@@ -22,6 +22,7 @@ func (em *ElectionManager) HandleStatus(c *gin.Context) {
 		"commit_index":  18,
 		"term":          11,
 		"num_peers":     3,
+		"events":        em.GetEvents(),
 	})
 }
 

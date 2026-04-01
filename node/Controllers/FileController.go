@@ -3,12 +3,13 @@ package controllers
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 
 	clock "github.com/DS_node/Clock"
+	"github.com/DS_node/Initializers"
 	"github.com/DS_node/repositories"
 	"github.com/gin-gonic/gin"
+	"github.com/minio/minio-go/v7"
 )
 
 func GetUserFiles(c *gin.Context) {
@@ -70,15 +71,16 @@ func DeleteFile(c *gin.Context) {
 		return
 	}
 
-	// Fetch the file record first to get the file path
+	// Fetch the file record first to get the file key
 	file, err := repositories.GetFileByID(uint(fileID))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 		return
 	}
 
-	if err := os.Remove(file.FilePath); err != nil {
-		fmt.Println("Warning: could not delete file from disk:", err)
+	bucketName := initializers.GetBucketName()
+	if err := initializers.MinioClient.RemoveObject(c.Request.Context(), bucketName, file.StorageKey, minio.RemoveObjectOptions{}); err != nil {
+		fmt.Println("Warning: could not delete file from MinIO:", err)
 	}
 
 	// Delete the DB record

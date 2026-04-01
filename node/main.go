@@ -3,7 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
+	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 	"github.com/DS_node/migrate"
 	"github.com/DS_node/models"
 	"github.com/gin-gonic/gin"
+	"github.com/minio/minio-go/v7"
 )
 
 var (
@@ -34,6 +36,7 @@ func init() {
 
 	initializers.LoadEnvVaribles()
 	migrate.MigrateDB()
+	initializers.InitStorage()
 
 	// Initial sync at startup
 	if err := clock.NTP.Sync("pool.ntp.org"); err != nil {
@@ -236,7 +239,7 @@ func main() {
 	router.GET("/clock", controllers.GetClock)
 
 	router.POST("/upload", LeaderOnly(), func(c *gin.Context) {
-		file, err := c.FormFile("file")
+		fileHeader, err := c.FormFile("file")
 		if err != nil {
 			AppMetrics.Lock()
 			AppMetrics.UploadFailures++
@@ -244,8 +247,21 @@ func main() {
 			c.String(400, "Get form err: %s", err.Error())
 			return
 		}
-		os.MkdirAll("./uploads", os.ModePerm)
-		if err := c.SaveUploadedFile(file, "./uploads/"+file.Filename); err != nil {
+
+		file, err := fileHeader.Open()
+		if err != nil {
+			c.String(400, "Get file err: %s", err.Error())
+			return
+		}
+		defer file.Close()
+
+		bucketName := initializers.GetBucketName()
+		objectName := fileHeader.Filename
+		_, err = initializers.MinioClient.PutObject(c.Request.Context(), bucketName, objectName, file, fileHeader.Size, minio.PutObjectOptions{
+			ContentType: fileHeader.Header.Get("Content-Type"),
+		})
+
+		if err != nil {
 			AppMetrics.Lock()
 			AppMetrics.UploadFailures++
 			AppMetrics.Unlock()
@@ -262,18 +278,18 @@ func main() {
 			ModTime string `json:"modTime"`
 		}
 		var files []FileInfo
-		entries, _ := os.ReadDir("./uploads")
-		for _, e := range entries {
-			if !e.IsDir() {
-				info, err := e.Info()
-				if err == nil {
-					files = append(files, FileInfo{
-						Name:    e.Name(),
-						Size:    info.Size(),
-						ModTime: info.ModTime().Format(time.RFC3339),
-					})
-				}
+		bucketName := initializers.GetBucketName()
+		objectCh := initializers.MinioClient.ListObjects(c.Request.Context(), bucketName, minio.ListObjectsOptions{})
+		
+		for object := range objectCh {
+			if object.Err != nil {
+				continue
 			}
+			files = append(files, FileInfo{
+				Name:    object.Key,
+				Size:    object.Size,
+				ModTime: object.LastModified.Format(time.RFC3339),
+			})
 		}
 		if files == nil {
 			files = make([]FileInfo, 0)
@@ -283,7 +299,15 @@ func main() {
 
 	router.GET("/download", func(c *gin.Context) {
 		fileName := c.Query("file")
-		c.File("./uploads/" + fileName)
+		bucketName := initializers.GetBucketName()
+		
+		reqParams := make(url.Values)
+		presignedURL, err := initializers.MinioClient.PresignedGetObject(c.Request.Context(), bucketName, fileName, time.Hour*1, reqParams)
+		if err != nil {
+			c.String(500, "Download err: %s", err.Error())
+			return
+		}
+		c.Redirect(http.StatusTemporaryRedirect, presignedURL.String())
 	})
 
 	router.GET("/status", func(c *gin.Context) {
@@ -291,8 +315,11 @@ func main() {
 		term := AppMetrics.LeaderChanges
 		AppMetrics.RUnlock()
 
-		entries, _ := os.ReadDir("./uploads")
-		applied := int64(len(entries))
+		bucketName := initializers.GetBucketName()
+		var applied int64
+		for range initializers.MinioClient.ListObjects(c.Request.Context(), bucketName, minio.ListObjectsOptions{}) {
+			applied++
+		}
 		peers := em.GetPeerCount()
 
 		em.HandleStatus(c, applied, term, peers)
@@ -305,8 +332,11 @@ func main() {
 		term := AppMetrics.LeaderChanges
 		AppMetrics.RUnlock()
 
-		entries, _ := os.ReadDir("./uploads")
-		applied := int64(len(entries))
+		bucketName := initializers.GetBucketName()
+		var applied int64
+		for range initializers.MinioClient.ListObjects(c.Request.Context(), bucketName, minio.ListObjectsOptions{}) {
+			applied++
+		}
 		peers := em.GetPeerCount()
 
 		em.HandleStatus(c, applied, term, peers)

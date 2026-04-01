@@ -4,14 +4,15 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 
 	clock "github.com/DS_node/Clock"
+	"github.com/DS_node/Initializers"
 	"github.com/DS_node/models"
 	"github.com/DS_node/repositories"
 	"github.com/gin-gonic/gin"
+	"github.com/minio/minio-go/v7"
 )
 
 func detectMIME(fileHeader *multipart.FileHeader) (string, error) {
@@ -62,30 +63,38 @@ func UploadMultipleFiles(c *gin.Context) {
 	}
  
 	files := form.File["files"]
-	uploadDir := "./uploads"
-	os.MkdirAll(uploadDir, os.ModePerm)
- 
+	bucketName := initializers.GetBucketName()
+
 	var savedRecords []models.UploadedFile
- 
+
 	for _, fileHeader := range files {
 		ext := filepath.Ext(fileHeader.Filename)
-		storedName := fmt.Sprintf("%d%s", clock.NTP.Now().UnixNano(), ext)
-		savePath := filepath.Join(uploadDir, storedName)
- 
-		if err := c.SaveUploadedFile(fileHeader, savePath); err != nil {
+		objectName := fmt.Sprintf("%d%s", clock.NTP.Now().UnixNano(), ext)
+
+		file, err := fileHeader.Open()
+		if err != nil {
 			continue
 		}
- 
+		defer file.Close()
+
+		_, err = initializers.MinioClient.PutObject(c.Request.Context(), bucketName, objectName, file, fileHeader.Size, minio.PutObjectOptions{
+			ContentType: fileHeader.Header.Get("Content-Type"),
+		})
+		if err != nil {
+			fmt.Println("MinIO Upload Error:", err)
+			continue
+		}
+
 		mimeType, _ := detectMIME(fileHeader)
- 
+
 		record := models.UploadedFile{
 			OriginalName: fileHeader.Filename,
-			FilePath:     savePath,
+			StorageKey:   objectName,
 			MimeType:     mimeType,
 			FileSize:     fileHeader.Size,
 			UserID:       usr.ID,
 		}
- 
+
 		if err := repositories.CreateFile(&record); err == nil {
 			savedRecords = append(savedRecords, record)
 		}

@@ -32,6 +32,18 @@ cd ..
 
 echo.
 echo ====================================================
+echo [STEP 2.5] Starting MinIO Storage Service
+echo ====================================================
+cd node
+if not exist "minio.exe" (
+    echo Downloading MinIO Server...
+    powershell -Command "Invoke-WebRequest -Uri 'https://dl.min.io/server/minio/release/windows-amd64/minio.exe' -OutFile 'minio.exe'"
+)
+start "Distributed Storage - MinIO" cmd /k "set MINIO_ROOT_USER=minioadmin && set MINIO_ROOT_PASSWORD=minioadmin && minio.exe server .\minio_data"
+cd ..
+
+echo.
+echo ====================================================
 echo [STEP 3] Starting Orchestrator (Manages 7 Nodes)
 echo ====================================================
 start "Distributed Storage - Orchestrator" cmd /k "cd node && orchestrator.exe"
@@ -73,6 +85,11 @@ echo.
 echo [3/3] Shutting down Orchestrator...
 taskkill /F /IM orchestrator.exe /T > nul 2>&1
 echo [OK] Orchestrator killed.
+
+echo.
+echo [4/4] Shutting down MinIO...
+taskkill /F /IM minio.exe /T > nul 2>&1
+echo [OK] MinIO killed.
 
 echo.
 echo ====================================================

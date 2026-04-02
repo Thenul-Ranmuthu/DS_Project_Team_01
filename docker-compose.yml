@@ -1,0 +1,41 @@
+services:
+  mysql-master:
+    image: 'mariadb:10.11'
+    restart: always
+    environment:
+      - MARIADB_ROOT_PASSWORD=t123
+      - MARIADB_DATABASE=dsdb
+      - MARIADB_USER=ds_user
+      - MARIADB_PASSWORD=t123
+    command: [
+      "mariadbd",
+      "--log-bin=mysql-bin",
+      "--server-id=1",
+      "--binlog-do-db=dsdb"
+    ]
+
+  mysql-replica:
+    image: 'mariadb:10.11'
+    restart: always
+    environment:
+      - MARIADB_ROOT_PASSWORD=t123
+      - MARIADB_DATABASE=dsdb
+      - MARIADB_USER=ds_user
+      - MARIADB_PASSWORD=t123
+    command: [
+      "mariadbd",
+      "--server-id=2",
+      "--log-bin=mysql-bin"
+    ]
+    depends_on:
+      - mysql-master
+
+  haproxy:
+    image: haproxy:latest
+    ports:
+      - "3307:3307"
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - mysql-master
+      - mysql-replica

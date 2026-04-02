@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	"runtime"
 )
 
 type NodeProcess struct {
@@ -46,7 +47,11 @@ func startNode(id string, port string) error {
 		return fmt.Errorf("node %s already running", id)
 	}
 
-	cmd := exec.Command("./server.exe")
+	binaryName := "./server"
+	if runtime.GOOS == "windows" {
+		binaryName = "./server.exe"
+	}
+	cmd := exec.Command(binaryName)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = append(os.Environ(),

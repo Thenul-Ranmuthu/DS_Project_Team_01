@@ -5,6 +5,18 @@ setlocal
 if exist "node\server.exe" del "node\server.exe"
 
 echo ====================================================
+echo [STEP 0] Starting Replicated MySQL Cluster (Docker Clean Start)
+echo ====================================================
+docker-compose down -v && docker-compose up -d
+if %errorlevel% neq 0 (
+    echo [ERROR] Docker Compose failed! Make sure Docker Desktop is RUNNING.
+    pause
+    exit /b 1
+)
+echo Waiting 45 seconds for MySQL Galera Cluster to initialize and sync...
+timeout /t 45 /nobreak
+
+echo ====================================================
 echo [STEP 1] Building Backend and Orchestrator
 echo ====================================================
 cd node
@@ -50,9 +62,9 @@ start "Distributed Storage - Orchestrator" cmd /k "cd node && orchestrator.exe"
 
 echo.
 echo ====================================================
-echo [STEP 4] Waiting 30 seconds for 7 nodes to initialize
+echo [STEP 4] Waiting 20 seconds for 7 nodes to initialize
 echo ====================================================
-timeout /t 30 /nobreak
+timeout /t 20 /nobreak
 
 echo.
 echo ====================================================
@@ -90,6 +102,11 @@ echo.
 echo [4/4] Shutting down MinIO...
 taskkill /F /IM minio.exe /T > nul 2>&1
 echo [OK] MinIO killed.
+
+echo.
+echo [5/5] Shutting down Replicated MySQL Cluster...
+docker-compose down
+echo [OK] MySQL Cluster stopped.
 
 echo.
 echo ====================================================

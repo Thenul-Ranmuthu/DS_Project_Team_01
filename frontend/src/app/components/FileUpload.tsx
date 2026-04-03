@@ -20,7 +20,7 @@ export default function FileUpload() {
     const [message, setMessage] = useState("");
     const [dragging, setDragging] = useState(false);
 
-    const findLeaderAndUpload = async (fileToUpload: File) => {
+    const findLeaderAndUpload = async (fileToUpload: File, idempotencyKey: string) => {
         for (const nodeUrl of BACKEND_NODES) {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 1000);
@@ -30,34 +30,48 @@ export default function FileUpload() {
                 if (!statusRes.ok) continue;
                 const status = await statusRes.json();
                 if (status.state === "Leader") {
-                    return await uploadToNode(nodeUrl, fileToUpload);
+                    return await uploadToNode(nodeUrl, fileToUpload, idempotencyKey);
                 }
             } catch (err) {
                 clearTimeout(timeoutId);
                 continue;
             }
         }
-        return await uploadToNode(BACKEND_NODES[0], fileToUpload);
+        return await uploadToNode(BACKEND_NODES[0], fileToUpload, idempotencyKey);
     };
 
-    const uploadToNode = async (nodeUrl: string, fileToUpload: File): Promise<boolean> => {
-        setMessage(`Broadcasting ${fileToUpload.name}...`);
+    const uploadToNode = async (nodeUrl: string, fileToUpload: File, idempotencyKey: string, attempt = 1): Promise<boolean> => {
+        setMessage(`Broadcasting ${fileToUpload.name} (Attempt ${attempt})...`);
         const formData = new FormData();
         formData.append("file", fileToUpload);
 
         try {
-            const res = await fetch(`${nodeUrl}/upload`, { method: "POST", body: formData });
+            const res = await fetch(`${nodeUrl}/upload`, { 
+                method: "POST", 
+                body: formData,
+                headers: {
+                    "Idempotency-Key": idempotencyKey
+                }
+            });
             if (res.ok) {
                 return true;
             } else if (res.status === 423) {
                 const data = await res.json();
                 if (data.leader) {
                     const port = parseInt(data.leader.split(":")[1]);
-                    return await uploadToNode(`http://localhost:${port}`, fileToUpload);
+                    return await uploadToNode(`http://localhost:${port}`, fileToUpload, idempotencyKey, attempt);
                 }
+            } else if (res.status >= 500) {
+                 throw new Error(`Server Error ${res.status}`);
             }
             return false;
         } catch (err: any) {
+            if (attempt <= 5) {
+                const backoffMs = Math.pow(2, attempt) * 500 + Math.random() * 200;
+                setMessage(`Upload failed. Retrying in ${Math.round(backoffMs)}ms...`);
+                await new Promise(resolve => setTimeout(resolve, backoffMs));
+                return await uploadToNode(nodeUrl, fileToUpload, idempotencyKey, attempt + 1);
+            }
             return false;
         }
     };
@@ -71,7 +85,8 @@ export default function FileUpload() {
 
         for (let i = 0; i < files.length; i++) {
             setMessage(`Uploading fragment ${i + 1}/${files.length}...`);
-            const success = await findLeaderAndUpload(files[i]);
+            const idempotencyKey = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2) + Date.now().toString(36);
+            const success = await findLeaderAndUpload(files[i], idempotencyKey);
             if (success) successCount++;
         }
 

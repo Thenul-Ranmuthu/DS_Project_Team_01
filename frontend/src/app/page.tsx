@@ -10,11 +10,11 @@ export default function Home() {
       {/* Dynamic Background */}
       <div className="fixed inset-0 -z-10 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-900/10 via-black to-black opacity-60"></div>
 
-      <div className="max-w-[1440px] mx-auto p-4 md:p-8 lg:p-12">
+      <div className="max-w-[1600px] mx-auto p-4 md:p-8 lg:p-12">
         {/* Header Unit */}
         <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-16 px-4">
           <div className="space-y-2">
-            <h1 className="text-4xl md:text-5xl font-display font-black tracking-tight flex items-center gap-3">
+            <h1 className="text-4xl md:text-5xl font-display font-black tracking-tight flex items-center gap-3 pr-4">
               <span className="bg-gradient-to-br from-white to-white/40 bg-clip-text text-transparent italic">DISTRIBUTED</span>
               <span className="text-blue-500 italic">SYSTEMS</span>
             </h1>
@@ -41,11 +41,11 @@ export default function Home() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
 
           {/* Left Col: Actions */}
-          <section className="lg:col-span-4 space-y-8 animate-in fade-in slide-in-from-left-4 duration-700">
+          <section className="lg:col-span-3 space-y-8 animate-in fade-in slide-in-from-left-4 duration-700">
             <div className="glass p-8 rounded-3xl relative overflow-hidden group">
               <div className="absolute -top-12 -right-12 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl group-hover:bg-blue-500/20 transition-all"></div>
 
-              <h2 className="text-lg font-display font-bold uppercase tracking-widest mb-8 flex items-center gap-3">
+              <h2 className="text-xl font-display font-bold uppercase tracking-widest mb-8 flex items-center gap-3">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
                 Input Terminal
               </h2>
@@ -67,7 +67,7 @@ export default function Home() {
           </section>
 
           {/* Right Col: Data */}
-          <section className="lg:col-span-8 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-150">
+          <section className="lg:col-span-9 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-150">
             <div className="glass p-1 rounded-3xl min-h-[600px] flex flex-col bg-white/2 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.6)]">
               <div className="p-8 border-b border-white/10 flex items-center justify-between">
                 <div>

@@ -1,34 +1,38 @@
 services:
   mysql-master:
-    image: 'mariadb:10.11'
+    image: 'bitnami/mariadb:latest'
     restart: always
     environment:
+      - MARIADB_REPLICATION_MODE=master
+      - MARIADB_REPLICATION_USER=repl_user
+      - MARIADB_REPLICATION_PASSWORD=repl_password
       - MARIADB_ROOT_PASSWORD=t123
-      - MARIADB_DATABASE=dsdb
       - MARIADB_USER=ds_user
       - MARIADB_PASSWORD=t123
-    command: [
-      "mariadbd",
-      "--log-bin=mysql-bin",
-      "--server-id=1",
-      "--binlog-do-db=dsdb"
-    ]
+      - MARIADB_DATABASE=dsdb
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-uroot", "-pt123"]
+      interval: 5s
+      retries: 5
 
   mysql-replica:
-    image: 'mariadb:10.11'
+    image: 'bitnami/mariadb:latest'
     restart: always
     environment:
+      - MARIADB_REPLICATION_MODE=slave
+      - MARIADB_REPLICATION_USER=repl_user
+      - MARIADB_REPLICATION_PASSWORD=repl_password
+      - MARIADB_MASTER_HOST=mysql-master
+      - MARIADB_MASTER_PORT_NUMBER=3306
+      - MARIADB_MASTER_ROOT_USER=root
+      - MARIADB_MASTER_ROOT_PASSWORD=t123
       - MARIADB_ROOT_PASSWORD=t123
-      - MARIADB_DATABASE=dsdb
       - MARIADB_USER=ds_user
       - MARIADB_PASSWORD=t123
-    command: [
-      "mariadbd",
-      "--server-id=2",
-      "--log-bin=mysql-bin"
-    ]
+      - MARIADB_DATABASE=dsdb
     depends_on:
-      - mysql-master
+      mysql-master:
+        condition: service_healthy
 
   haproxy:
     image: haproxy:latest

@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +19,7 @@ import (
 	"github.com/DS_node/election"
 	"github.com/DS_node/migrate"
 	"github.com/DS_node/models"
+	"github.com/DS_node/repositories"
 	"github.com/gin-gonic/gin"
 	"github.com/minio/minio-go/v7"
 )
@@ -132,6 +135,101 @@ func init() {
 	go func() {
 		if err := em.Start(); err != nil {
 			log.Fatalf("Election failed: %v", err)
+		}
+	}()
+
+	// Follower WAL Sync: periodically pull COMPLETED WAL entries from the leader
+	// and replay metadata changes locally. MinIO handles file durability independently.
+	go func() {
+		var lastSeenLogID uint64 = 0
+		ticker := time.NewTicker(5 * time.Second)
+		for range ticker.C {
+			if em.IsLeader() {
+				continue // Leaders write WAL; they don't pull from themselves
+			}
+			leaderID := em.LeaderID()
+			if leaderID == "" {
+				continue
+			}
+			// Derive leader port from leaderID (node_1 -> 8000, node_2 -> 8001, ...)
+			leaderPort := 8000
+			if strings.HasPrefix(leaderID, "node_") {
+				if idx, err := strconv.Atoi(strings.TrimPrefix(leaderID, "node_")); err == nil {
+					leaderPort = 8000 + (idx - 1)
+				}
+			}
+			syncURL := fmt.Sprintf("http://localhost:%d/replication/sync?after=%d", leaderPort, lastSeenLogID)
+			resp, err := http.Get(syncURL)
+			if err != nil {
+				log.Printf("[WAL-Sync] Could not reach leader at port %d: %v", leaderPort, err)
+				continue
+			}
+			var entries []models.WriteAheadLog
+			if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+				resp.Body.Close()
+				log.Printf("[WAL-Sync] Failed to decode sync response: %v", err)
+				continue
+			}
+			resp.Body.Close()
+
+			for _, entry := range entries {
+				switch entry.Operation {
+				case models.WALOpUpload:
+					var payload struct {
+						OriginalName string `json:"original_name"`
+						StorageKey   string `json:"storage_key"`
+						MimeType     string `json:"mime_type"`
+						FileSize     int64  `json:"file_size"`
+						UserID       uint   `json:"user_id"`
+					}
+					if err := json.Unmarshal([]byte(entry.Payload), &payload); err != nil {
+						log.Printf("[WAL-Sync] Failed to parse UPLOAD payload (log %d): %v", entry.LogID, err)
+						continue
+					}
+					record := &models.UploadedFile{
+						OriginalName: payload.OriginalName,
+						StorageKey:   payload.StorageKey,
+						MimeType:     payload.MimeType,
+						FileSize:     payload.FileSize,
+						UserID:       payload.UserID,
+					}
+					if err := repositories.CreateFile(record); err != nil {
+						log.Printf("[WAL-Sync] UPLOAD replay failed (log %d): %v", entry.LogID, err)
+					} else {
+						em.LogEvent(fmt.Sprintf("[WAL-Sync] Replayed UPLOAD log %d: %s", entry.LogID, payload.OriginalName))
+					}
+				case models.WALOpDelete:
+					var payload struct {
+						FileID uint `json:"file_id"`
+					}
+					if err := json.Unmarshal([]byte(entry.Payload), &payload); err != nil {
+						log.Printf("[WAL-Sync] Failed to parse DELETE payload (log %d): %v", entry.LogID, err)
+						continue
+					}
+					if err := repositories.DeleteFile(payload.FileID); err != nil {
+						log.Printf("[WAL-Sync] DELETE replay failed (log %d): %v", entry.LogID, err)
+					} else {
+						em.LogEvent(fmt.Sprintf("[WAL-Sync] Replayed DELETE log %d: file_id=%d", entry.LogID, payload.FileID))
+					}
+				case models.WALOpCreateUser:
+					var user models.User
+					if err := json.Unmarshal([]byte(entry.Payload), &user); err != nil {
+						log.Printf("[WAL-Sync] Failed to parse CREATE_USER payload (log %d): %v", entry.LogID, err)
+						continue
+					}
+					if err := repositories.CreateUser(&user); err != nil {
+						log.Printf("[WAL-Sync] CREATE_USER replay failed (log %d): %v", entry.LogID, err)
+					} else {
+						em.LogEvent(fmt.Sprintf("[WAL-Sync] Replayed CREATE_USER log %d: %s", entry.LogID, user.Email))
+					}
+				}
+				if entry.LogID > lastSeenLogID {
+					lastSeenLogID = entry.LogID
+				}
+			}
+			if len(entries) > 0 {
+				log.Printf("[WAL-Sync] Applied %d entries from leader (last log_id: %d)", len(entries), lastSeenLogID)
+			}
 		}
 	}()
 }
@@ -364,6 +462,27 @@ func main() {
 	})
 	router.POST("/election/resign", em.HandleResign)
 
+	// Replication Sync: leader serves COMPLETED WAL entries after a given log_id.
+	// Followers poll this endpoint to replay missed metadata operations.
+	router.GET("/replication/sync", func(c *gin.Context) {
+		afterStr := c.DefaultQuery("after", "0")
+		afterLogID, err := strconv.ParseUint(afterStr, 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid 'after' parameter"})
+			return
+		}
+		entries, err := repositories.GetCompletedWALAfter(afterLogID, 100)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch WAL entries"})
+			return
+		}
+		if entries == nil {
+			entries = []models.WriteAheadLog{}
+		}
+		nodeID := os.Getenv("NODE_ID")
+		log.Printf("[WAL] Node %s served %d WAL entries (after log_id=%d)", nodeID, len(entries), afterLogID)
+		c.JSON(http.StatusOK, entries)
+	})
 
 	router.Run(":" + config.Load().Port)
 }

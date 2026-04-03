@@ -3,10 +3,12 @@ package controllers
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 
 	clock "github.com/DS_node/Clock"
 	"github.com/DS_node/Initializers"
+	"github.com/DS_node/models"
 	"github.com/DS_node/repositories"
 	"github.com/gin-gonic/gin"
 	"github.com/minio/minio-go/v7"
@@ -53,16 +55,14 @@ func DeleteFile(c *gin.Context) {
 	if senderClockStr := c.GetHeader("X-Lamport-Clock"); senderClockStr != "" {
 		senderClock, err := strconv.ParseUint(senderClockStr, 10, 64)
 		if err == nil {
-			// Received a clock value from another node: sync before proceeding.
 			clockValue = clock.Node.Sync(senderClock)
 		} else {
 			clockValue = clock.Node.Tick()
 		}
 	} else {
-		// Local upload event: tick the clock.
 		clockValue = clock.Node.Tick()
 	}
- 
+
 	fmt.Printf("[LamportClock] Delete event received. Clock advanced to: %d\n", clockValue)
 
 	fileID, err := strconv.ParseUint(fileIDStr, 10, 32)
@@ -78,16 +78,38 @@ func DeleteFile(c *gin.Context) {
 		return
 	}
 
+	// WAL: log PENDING before any mutation
+	nodeID := os.Getenv("NODE_ID")
+	walPayload := map[string]any{
+		"file_id":     fileID,
+		"storage_key": file.StorageKey,
+	}
+	walEntry, walErr := repositories.CreateWALEntry(models.WALOpDelete, walPayload, nodeID)
+	if walErr != nil {
+		fmt.Printf("[WAL] Failed to create WAL entry for DELETE (file %d): %v\n", fileID, walErr)
+	}
+
 	bucketName := initializers.GetBucketName()
 	if err := initializers.MinioClient.RemoveObject(c.Request.Context(), bucketName, file.StorageKey, minio.RemoveObjectOptions{}); err != nil {
 		fmt.Println("Warning: could not delete file from MinIO:", err)
+		// Non-fatal: proceed with DB delete even if MinIO object is already gone
 	}
 
 	// Delete the DB record
 	if err := repositories.DeleteFile(uint(fileID)); err != nil {
+		if walEntry != nil {
+			repositories.MarkWALFailed(walEntry.LogID)
+			fmt.Printf("[WAL] DELETE failed (db) — WAL entry %d marked FAILED\n", walEntry.LogID)
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete file"})
 		return
 	}
 
+	if walEntry != nil {
+		repositories.MarkWALCompleted(walEntry.LogID)
+		fmt.Printf("[WAL] DELETE committed (file %d, key: %s) — WAL entry %d marked COMPLETED\n", fileID, file.StorageKey, walEntry.LogID)
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "File deleted successfully"})
 }
+

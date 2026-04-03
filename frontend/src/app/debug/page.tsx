@@ -193,11 +193,26 @@ export default function DebugPage() {
                                                     </div>
                                                 </div>
                                                 <div className="space-y-3 max-h-56 overflow-y-auto pr-1.5 custom-scrollbar">
-                                                    {stats.events.slice().reverse().map((evt: string, idx: number) => (
-                                                        <div key={idx} className="text-[12px] font-mono opacity-60 hover:opacity-100 transition-opacity border-l border-white/10 pl-3 py-1 leading-relaxed tracking-tight underline-offset-2 font-medium">
-                                                            {evt}
-                                                        </div>
-                                                    ))}
+                                                    {stats.events.slice().reverse().map((evt: string, idx: number) => {
+                                                        const isWalSync = evt.includes("[WAL-Sync]");
+                                                        const isWal = !isWalSync && evt.includes("[WAL]");
+                                                        const isIdempotency = evt.includes("[Idempotency]");
+                                                        const isAlert = evt.includes("[ALERT]");
+                                                        const colorClass = isAlert
+                                                            ? "border-red-500/40 text-red-400"
+                                                            : isWalSync
+                                                            ? "border-emerald-500/40 text-emerald-400"
+                                                            : isWal
+                                                            ? "border-yellow-500/40 text-yellow-300"
+                                                            : isIdempotency
+                                                            ? "border-purple-500/40 text-purple-300"
+                                                            : "border-white/10 opacity-60 hover:opacity-100";
+                                                        return (
+                                                            <div key={idx} className={`text-[12px] font-mono transition-opacity border-l pl-3 py-1 leading-relaxed tracking-tight font-medium ${colorClass}`}>
+                                                                {evt}
+                                                            </div>
+                                                        );
+                                                    })}
                                                 </div>
                                             </div>
                                         )}

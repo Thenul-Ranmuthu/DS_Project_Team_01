@@ -17,4 +17,5 @@ func MigrateDB() {
 	initializers.DB.AutoMigrate(&models.ElectionEvent{})
 	initializers.DB.AutoMigrate(&models.IdempotencyRecord{})
 	initializers.DB.AutoMigrate(&models.WriteAheadLog{})
+	initializers.DB.AutoMigrate(&models.ReplicationState{})
 }

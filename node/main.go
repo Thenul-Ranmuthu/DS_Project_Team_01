@@ -27,13 +27,16 @@ import (
 
 var (
 	em         *election.ElectionManager
+	syncHTTP   = &http.Client{Timeout: 15 * time.Second}
 	AppMetrics struct {
 		sync.RWMutex
-		DBLatencyMs    int64
-		UploadFailures int64
-		LeaderChanges  int64
-		DBReconnects   int64
-		SyncLagSeconds int64 // seconds since last successful WAL sync poll from leader (including empty = caught up)
+		DBLatencyMs           int64
+		UploadFailures        int64
+		LeaderChanges         int64
+		DBReconnects          int64
+		SyncLagSeconds        int64 // seconds since last successful WAL sync poll from leader (including empty = caught up)
+		ZKRecoveryCount       int64 // times we re-registered after ZK session loss / forced recovery
+		LastZKRecoveryUnix    int64 // unix time of last recovery callback
 	}
 )
 
@@ -93,11 +96,19 @@ func init() {
 		AppMetrics.LeaderChanges++
 		changes := AppMetrics.LeaderChanges
 		AppMetrics.Unlock()
-		
+
 		em.LogEvent(fmt.Sprintf("Leader changed to %s. Total changes: %d", newLeaderID, changes))
 		if changes > 5 {
 			em.LogEvent("[ALERT] Leader changes are happening too often! Possible network flap or ZK overload.")
 		}
+	})
+
+	em.SetOnRecovery(func() {
+		AppMetrics.Lock()
+		AppMetrics.ZKRecoveryCount++
+		AppMetrics.LastZKRecoveryUnix = time.Now().Unix()
+		AppMetrics.Unlock()
+		em.LogEvent("[Recovery] Node recovery cycle recorded (ZK session / re-registration)")
 	})
 
 
@@ -143,7 +154,7 @@ func init() {
 	// Follower WAL Sync: periodically pull COMPLETED WAL entries from the leader
 	// and replay metadata changes locally. MinIO handles file durability independently.
 	go func() {
-		var lastSeenLogID uint64 = 0
+		lastSeenLogID := repositories.GetLastAppliedLeaderWALID()
 		var lastSyncTime = time.Now()
 		ticker := time.NewTicker(5 * time.Second)
 		for range ticker.C {
@@ -174,7 +185,7 @@ func init() {
 				}
 			}
 			syncURL := fmt.Sprintf("http://localhost:%d/replication/sync?after=%d", leaderPort, lastSeenLogID)
-			resp, err := http.Get(syncURL)
+			resp, err := syncHTTP.Get(syncURL)
 			if err != nil {
 				log.Printf("[WAL-Sync] Could not reach leader at port %d: %v (lag: %ds)", leaderPort, err, lag)
 				continue
@@ -221,7 +232,7 @@ func init() {
 						FileSize:     payload.FileSize,
 						UserID:       payload.UserID,
 					}
-					if err := repositories.CreateFile(record); err != nil {
+					if err := repositories.CreateFileFromReplication(record); err != nil {
 						log.Printf("[WAL-Sync] UPLOAD replay failed (log %d): %v", entry.LogID, err)
 					} else {
 						em.LogEvent(fmt.Sprintf("[WAL-Sync] Replayed UPLOAD log %d: %s", entry.LogID, payload.OriginalName))
@@ -245,7 +256,7 @@ func init() {
 						log.Printf("[WAL-Sync] Failed to parse CREATE_USER payload (log %d): %v", entry.LogID, err)
 						continue
 					}
-					if err := repositories.CreateUser(&user); err != nil {
+					if err := repositories.CreateUserFromReplication(&user); err != nil {
 						log.Printf("[WAL-Sync] CREATE_USER replay failed (log %d): %v", entry.LogID, err)
 					} else {
 						em.LogEvent(fmt.Sprintf("[WAL-Sync] Replayed CREATE_USER log %d: %s", entry.LogID, user.Email))
@@ -257,6 +268,9 @@ func init() {
 			}
 			if len(entries) > 0 {
 				log.Printf("[WAL-Sync] Applied %d entries from leader (last log_id: %d)", len(entries), lastSeenLogID)
+			}
+			if err := repositories.SetLastAppliedLeaderWALID(lastSeenLogID); err != nil {
+				log.Printf("[WAL-Sync] persist replication watermark: %v", err)
 			}
 		}
 	}()
@@ -361,11 +375,29 @@ func main() {
 		AppMetrics.RLock()
 		defer AppMetrics.RUnlock()
 		c.JSON(200, gin.H{
-			"db_latency_ms":    AppMetrics.DBLatencyMs,
-			"upload_failures":  AppMetrics.UploadFailures,
-			"leader_changes":   AppMetrics.LeaderChanges,
-			"db_reconnects":    AppMetrics.DBReconnects,
-			"sync_lag_s":       AppMetrics.SyncLagSeconds,
+			"db_latency_ms":          AppMetrics.DBLatencyMs,
+			"upload_failures":        AppMetrics.UploadFailures,
+			"leader_changes":         AppMetrics.LeaderChanges,
+			"db_reconnects":          AppMetrics.DBReconnects,
+			"sync_lag_s":             AppMetrics.SyncLagSeconds,
+			"zk_recovery_total":      AppMetrics.ZKRecoveryCount,
+			"last_zk_recovery_unix":  AppMetrics.LastZKRecoveryUnix,
+		})
+	})
+
+	router.GET("/recovery/status", func(c *gin.Context) {
+		AppMetrics.RLock()
+		zkRec := AppMetrics.ZKRecoveryCount
+		zkRecUnix := AppMetrics.LastZKRecoveryUnix
+		AppMetrics.RUnlock()
+		c.JSON(200, gin.H{
+			"zk_state":                 em.ZKState().String(),
+			"zk_connected":             em.IsConnected(),
+			"is_leader":                em.IsLeader(),
+			"zk_recovery_total":        zkRec,
+			"last_zk_recovery_unix":    zkRecUnix,
+			"leader_watchdog_interval": "15s",
+			"zk_session_timeout":       "10s",
 		})
 	})
 

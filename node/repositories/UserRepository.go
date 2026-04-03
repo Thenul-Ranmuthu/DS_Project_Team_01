@@ -1,8 +1,11 @@
 package repositories
 
 import (
+	"errors"
+
 	initializers "github.com/DS_node/Initializers"
 	"github.com/DS_node/models"
+	"gorm.io/gorm"
 )
 
 func GetUserByID(userID uint) (models.User, error) {
@@ -20,4 +23,16 @@ func GetUserByEmail(email string) (models.User, error) {
 func CreateUser(user *models.User) error {
 	result := initializers.DB.Create(user)
 	return result.Error
+}
+
+// CreateUserFromReplication applies CREATE_USER from leader WAL; no-op if email already registered.
+func CreateUserFromReplication(user *models.User) error {
+	_, err := GetUserByEmail(user.Email)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	return CreateUser(user)
 }

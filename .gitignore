@@ -3,3 +3,4 @@ node/uploads
 node/minio.exe
 node/minio_data/
 zkServer.cmd.lnk
+4) Fault Tolerance.pdf

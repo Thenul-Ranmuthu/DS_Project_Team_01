@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -32,6 +33,7 @@ var (
 		UploadFailures int64
 		LeaderChanges  int64
 		DBReconnects   int64
+		SyncLagSeconds int64 // seconds since last successful WAL sync poll from leader (including empty = caught up)
 	}
 )
 
@@ -142,13 +144,26 @@ func init() {
 	// and replay metadata changes locally. MinIO handles file durability independently.
 	go func() {
 		var lastSeenLogID uint64 = 0
+		var lastSyncTime = time.Now()
 		ticker := time.NewTicker(5 * time.Second)
 		for range ticker.C {
+			// Update sync lag metric (seconds since last successful write from leader)
+			lag := int64(time.Since(lastSyncTime).Seconds())
+			AppMetrics.Lock()
+			AppMetrics.SyncLagSeconds = lag
+			AppMetrics.Unlock()
+
 			if em.IsLeader() {
-				continue // Leaders write WAL; they don't pull from themselves
+				// Leaders are always current; reset lag
+				AppMetrics.Lock()
+				AppMetrics.SyncLagSeconds = 0
+				AppMetrics.Unlock()
+				lastSyncTime = time.Now()
+				continue
 			}
 			leaderID := em.LeaderID()
 			if leaderID == "" {
+				log.Printf("[WAL-Sync] No leader elected yet; skipping sync (lag: %ds)", lag)
 				continue
 			}
 			// Derive leader port from leaderID (node_1 -> 8000, node_2 -> 8001, ...)
@@ -161,16 +176,29 @@ func init() {
 			syncURL := fmt.Sprintf("http://localhost:%d/replication/sync?after=%d", leaderPort, lastSeenLogID)
 			resp, err := http.Get(syncURL)
 			if err != nil {
-				log.Printf("[WAL-Sync] Could not reach leader at port %d: %v", leaderPort, err)
+				log.Printf("[WAL-Sync] Could not reach leader at port %d: %v (lag: %ds)", leaderPort, err, lag)
+				continue
+			}
+			bodyBytes, readErr := readAllAndClose(resp.Body)
+			if readErr != nil {
+				log.Printf("[WAL-Sync] Failed to read sync response: %v", readErr)
+				continue
+			}
+			if resp.StatusCode != http.StatusOK {
+				log.Printf("[WAL-Sync] Leader returned HTTP %d: %s", resp.StatusCode, truncateForLog(bodyBytes, 200))
 				continue
 			}
 			var entries []models.WriteAheadLog
-			if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
-				resp.Body.Close()
+			if err := json.Unmarshal(bodyBytes, &entries); err != nil {
 				log.Printf("[WAL-Sync] Failed to decode sync response: %v", err)
 				continue
 			}
-			resp.Body.Close()
+
+			// Empty batch means we are caught up with the leader's WAL; still counts as a successful sync.
+			lastSyncTime = time.Now()
+			AppMetrics.Lock()
+			AppMetrics.SyncLagSeconds = 0
+			AppMetrics.Unlock()
 
 			for _, entry := range entries {
 				switch entry.Operation {
@@ -232,6 +260,18 @@ func init() {
 			}
 		}
 	}()
+}
+
+func readAllAndClose(body io.ReadCloser) ([]byte, error) {
+	defer body.Close()
+	return io.ReadAll(body)
+}
+
+func truncateForLog(b []byte, max int) string {
+	if len(b) <= max {
+		return string(b)
+	}
+	return string(b[:max]) + "..."
 }
 
 
@@ -325,6 +365,43 @@ func main() {
 			"upload_failures":  AppMetrics.UploadFailures,
 			"leader_changes":   AppMetrics.LeaderChanges,
 			"db_reconnects":    AppMetrics.DBReconnects,
+			"sync_lag_s":       AppMetrics.SyncLagSeconds,
+		})
+	})
+
+	// Read-mode: informs the frontend of write capability and sync freshness.
+	// Followers serving stale data expose this clearly rather than silently.
+	router.GET("/read-mode", func(c *gin.Context) {
+		isLeader := em.IsLeader()
+		hasLeader := em.LeaderID() != ""
+		AppMetrics.RLock()
+		lag := AppMetrics.SyncLagSeconds
+		AppMetrics.RUnlock()
+
+		const staleLagThreshold = int64(30) // seconds before we warn about staleness
+
+		var mode, message string
+		switch {
+		case isLeader:
+			mode = "read-write"
+			message = "This node is the leader. Reads and writes are fully available."
+		case !hasLeader:
+			mode = "read-only"
+			message = "No leader elected. Writes are unavailable. Data shown may be stale — temporarily read-only."
+		case lag > staleLagThreshold:
+			mode = "read-only-stale"
+			message = fmt.Sprintf("Sync lag is %ds. Reads are available but data may be out of date — temporarily read-only.", lag)
+		default:
+			mode = "read-only"
+			message = "This node is a follower. Writes must go to the leader. Reads are available from local replica."
+		}
+
+		log.Printf("[ReadMode] node=%s mode=%s lag=%ds", os.Getenv("NODE_ID"), mode, lag)
+		c.JSON(200, gin.H{
+			"writable":   isLeader,
+			"mode":       mode,
+			"sync_lag_s": lag,
+			"message":    message,
 		})
 	})
 
@@ -392,17 +469,22 @@ func main() {
 
 	router.GET("/files", func(c *gin.Context) {
 		type FileInfo struct {
-			Name    string `json:"name"`
-			Size    int64  `json:"size"`
-			ModTime string `json:"modTime"`
+			Name        string `json:"name"`
+			Size        int64  `json:"size"`
+			ModTime     string `json:"modTime"`
+			MetaOnly    bool   `json:"meta_only,omitempty"`
 		}
 		var files []FileInfo
 		bucketName := initializers.GetBucketName()
+		minioOk := true
+
+		// Attempt primary path: list directly from MinIO
 		objectCh := initializers.MinioClient.ListObjects(c.Request.Context(), bucketName, minio.ListObjectsOptions{})
-		
 		for object := range objectCh {
 			if object.Err != nil {
-				continue
+				log.Printf("[GracefulRead] MinIO list error: %v — will fall back to DB metadata", object.Err)
+				minioOk = false
+				break
 			}
 			files = append(files, FileInfo{
 				Name:    object.Key,
@@ -410,6 +492,25 @@ func main() {
 				ModTime: object.LastModified.Format(time.RFC3339),
 			})
 		}
+
+		// Graceful fallback: serve metadata from local DB if MinIO is unreachable
+		if !minioOk || len(files) == 0 {
+			log.Printf("[GracefulRead] Falling back to DB metadata for /files")
+			var dbFiles []models.UploadedFile
+			if err := initializers.DB.Find(&dbFiles).Error; err == nil && len(dbFiles) > 0 {
+				files = nil
+				for _, f := range dbFiles {
+					files = append(files, FileInfo{
+						Name:     f.StorageKey,
+						Size:     f.FileSize,
+						ModTime:  f.UpdatedAt.Format(time.RFC3339),
+						MetaOnly: !minioOk,
+					})
+				}
+				log.Printf("[GracefulRead] Returned %d files from DB metadata fallback", len(files))
+			}
+		}
+
 		if files == nil {
 			files = make([]FileInfo, 0)
 		}
@@ -419,11 +520,30 @@ func main() {
 	router.GET("/download", func(c *gin.Context) {
 		fileName := c.Query("file")
 		bucketName := initializers.GetBucketName()
-		
+
 		reqParams := make(url.Values)
 		presignedURL, err := initializers.MinioClient.PresignedGetObject(c.Request.Context(), bucketName, fileName, time.Hour*1, reqParams)
 		if err != nil {
-			c.String(500, "Download err: %s", err.Error())
+			// Graceful degradation: MinIO presign failed; serve file metadata from DB instead of a hard error
+			log.Printf("[GracefulRead] MinIO presign failed for '%s': %v — returning metadata-only response", fileName, err)
+			var dbFile models.UploadedFile
+			dbErr := initializers.DB.Where("storage_key = ?", fileName).First(&dbFile).Error
+			if dbErr != nil {
+				c.JSON(503, gin.H{
+					"error":    "File storage temporarily unavailable and metadata not found.",
+					"degraded": true,
+				})
+				return
+			}
+			c.JSON(503, gin.H{
+				"error":         "File storage temporarily unavailable. Metadata served from local replica.",
+				"degraded":      true,
+				"meta_only":     true,
+				"original_name": dbFile.OriginalName,
+				"storage_key":   dbFile.StorageKey,
+				"file_size":     dbFile.FileSize,
+				"mime_type":     dbFile.MimeType,
+			})
 			return
 		}
 		c.Redirect(http.StatusTemporaryRedirect, presignedURL.String())

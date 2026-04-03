@@ -29,7 +29,6 @@ export default function DebugPage() {
         const stats: any = {};
         await Promise.all(
             NODES.map(async (node) => {
-                // If orchestrator explicitly says it is stopped, don't poll it (silences console errors)
                 if (orchestratorStatus[node.id] === "STOPPED") {
                     stats[node.id] = { state: "OFFLINE" };
                     return;
@@ -41,7 +40,25 @@ export default function DebugPage() {
                     const res = await fetch(`${node.url}/status`, { signal: controller.signal });
                     clearTimeout(timeoutId);
                     if (res.ok) {
-                        stats[node.id] = await res.json();
+                        const data = await res.json();
+
+                        // Co-fetch /read-mode and /metrics in parallel for richer telemetry
+                        const [rmResult, metricsResult] = await Promise.allSettled([
+                            fetch(`${node.url}/read-mode`, { signal: new AbortController().signal }),
+                            fetch(`${node.url}/metrics`,   { signal: new AbortController().signal }),
+                        ]);
+
+                        let readMode: any = null;
+                        if (rmResult.status === "fulfilled" && rmResult.value.ok) {
+                            readMode = await rmResult.value.json();
+                        }
+
+                        let metrics: any = null;
+                        if (metricsResult.status === "fulfilled" && metricsResult.value.ok) {
+                            metrics = await metricsResult.value.json();
+                        }
+
+                        stats[node.id] = { ...data, read_mode: readMode, metrics };
                     } else {
                         stats[node.id] = { state: "OFFLINE" };
                     }
@@ -121,6 +138,9 @@ export default function DebugPage() {
                         const stats = nodeStats[node.id];
                         const isOffline = !stats || stats.state === "OFFLINE";
                         const isLeader = stats?.state === "Leader";
+                        const readMode = stats?.read_mode;
+                        const syncLag = stats?.metrics?.sync_lag_s ?? null;
+                        const isStale = readMode?.mode === "read-only-stale";
 
                         return (
                             <div
@@ -153,6 +173,20 @@ export default function DebugPage() {
                                         )}
                                     </div>
 
+                                    {/* Read-mode chip — shown on live followers */}
+                                    {!isOffline && !isLeader && readMode && (
+                                        <div className="mb-4">
+                                            <span className={`inline-flex items-center gap-1.5 text-[9px] font-black font-mono uppercase tracking-widest px-3 py-1 rounded-full border
+                                                ${isStale
+                                                    ? "bg-amber-500/10 border-amber-500/30 text-amber-400"
+                                                    : "bg-blue-500/5 border-blue-500/20 text-blue-400"
+                                                }`}>
+                                                <span className={`w-1.5 h-1.5 rounded-full ${isStale ? "bg-amber-400" : "bg-blue-400"} animate-pulse`}></span>
+                                                {isStale ? `STALE — lag ${syncLag}s` : "READ-ONLY REPLICA"}
+                                            </span>
+                                        </div>
+                                    )}
+
                                     <div className="space-y-6">
                                         <div className="flex flex-col gap-1.5 font-mono text-[11px] uppercase font-black">
                                             <span className="opacity-20 flex items-center justify-between">State Transition <span className="h-px bg-white/5 flex-1 mx-3"></span></span>
@@ -179,6 +213,35 @@ export default function DebugPage() {
                                                     <span className="text-[10px] font-mono opacity-30 uppercase font-black">Cluster Peers</span>
                                                     <span className="text-lg font-display font-black tracking-tight">{stats.num_peers}</span>
                                                 </div>
+                                                {/* Sync Lag tile */}
+                                                {syncLag !== null && (
+                                                    <div className={`flex flex-col gap-1 border rounded-2xl p-3 transition-all col-span-1
+                                                        ${syncLag > 30
+                                                            ? "bg-amber-500/5 border-amber-500/20 group-hover:bg-amber-500/10"
+                                                            : "bg-white/5 border-white/5 group-hover:bg-white/10"
+                                                        }`}>
+                                                        <span className="text-[10px] font-mono opacity-30 uppercase font-black">WAL Lag</span>
+                                                        <span className={`text-lg font-display font-black tracking-tight ${syncLag > 30 ? "text-amber-400" : ""}`}>
+                                                            {syncLag}s
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                {/* Access Mode tile */}
+                                                {readMode && (
+                                                    <div className={`flex flex-col gap-1 border rounded-2xl p-3 transition-all col-span-1
+                                                        ${readMode.mode === "read-write"
+                                                            ? "bg-emerald-500/5 border-emerald-500/20 group-hover:bg-emerald-500/10"
+                                                            : isStale
+                                                            ? "bg-amber-500/5 border-amber-500/20 group-hover:bg-amber-500/10"
+                                                            : "bg-blue-500/5 border-blue-500/20 group-hover:bg-blue-500/10"
+                                                        }`}>
+                                                        <span className="text-[10px] font-mono opacity-30 uppercase font-black">Access Mode</span>
+                                                        <span className={`text-sm font-display font-black tracking-tight leading-tight
+                                                            ${readMode.mode === "read-write" ? "text-emerald-400" : isStale ? "text-amber-400" : "text-blue-400"}`}>
+                                                            {readMode.mode === "read-write" ? "R/W" : isStale ? "STALE" : "R/O"}
+                                                        </span>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
 

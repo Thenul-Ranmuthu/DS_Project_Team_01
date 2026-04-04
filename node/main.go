@@ -37,7 +37,8 @@ func init() {
 		}
 	}()
 
-	zkServers := []string{"172.30.112.1:2181"}
+	// Changed from 172.30.112.1 to 127.0.0.1 for your local ZooKeeper
+	zkServers := []string{"127.0.0.1:2181"}
 	nodeID := os.Getenv("NODE_ID")
 	if nodeID == "" {
 		log.Fatal("NODE_ID environment variable is required")

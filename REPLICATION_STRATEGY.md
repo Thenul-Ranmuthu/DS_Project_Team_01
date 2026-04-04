@@ -24,3 +24,27 @@ Conflict Handling: In the event of near-simultaneous updates to the same file, t
 
 4. Time Synchronization
 While Lamport Clocks handle logical ordering, the system also integrates NTP (Network Time Protocol) to maintain roughly synchronized physical clocks across servers. This provides human-readable timestamps for file metadata and assists in debugging and logging.
+
+5. Implementation Note (Current Behavior)
+The replication workflow is implemented with internal node-to-node APIs and environment-based peer discovery.
+
+Upload replication:
+- External client upload enters through /upload/:email on the receiving node.
+- The node stores the file locally with a generated unique filename.
+- The replication layer forwards that stored filename and file content to each peer using POST /internal/replicate.
+- Followers save the replica under the same stored filename for deterministic delete propagation.
+
+Delete replication:
+- External delete enters through DELETE /files/:id.
+- The node resolves the stored file path, deletes locally, then broadcasts DELETE /internal/delete/:filename to peers.
+- Every node exposes internal handlers for both:
+	- POST /internal/replicate
+	- DELETE /internal/delete/:filename
+
+Configuration requirements:
+- Each node must define PEERS in its .env file as a comma-separated list of other node base URLs.
+- Example: PEERS=http://localhost:5000,http://localhost:5050,http://localhost:5051 (excluding self for each node).
+- Missing or incorrect PEERS values result in partial or no replication.
+
+Consistency note:
+- Replication calls are asynchronous, so the implementation provides eventual convergence across replicas after write/delete operations complete.

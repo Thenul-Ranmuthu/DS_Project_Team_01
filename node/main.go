@@ -12,23 +12,23 @@ import (
 )
 
 func init() {
-    initializers.LoadEnvVaribles()
-    migrate.MigrateDB()
+	initializers.LoadEnvVaribles()
+	migrate.MigrateDB()
 
-    // Initial sync at startup
-    if err := clock.NTP.Sync("pool.ntp.org"); err != nil {
-        log.Printf("[NTPClock] Initial sync failed: %v", err)
-    }
+	// Initial sync at startup
+	if err := clock.NTP.Sync("pool.ntp.org"); err != nil {
+		log.Printf("[NTPClock] Initial sync failed: %v", err)
+	}
 
-    // Re-sync every 10 minutes in the background
-    go func() {
-        ticker := time.NewTicker(10 * time.Minute)
-        for range ticker.C {
-            if err := clock.NTP.Sync("pool.ntp.org"); err != nil {
-                log.Printf("[NTPClock] Re-sync failed: %v", err)
-            }
-        }
-    }()
+	// Re-sync every 10 minutes in the background
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		for range ticker.C {
+			if err := clock.NTP.Sync("pool.ntp.org"); err != nil {
+				log.Printf("[NTPClock] Re-sync failed: %v", err)
+			}
+		}
+	}()
 }
 
 func main() {
@@ -45,6 +45,9 @@ func main() {
 
 	// Lamport clock — lets other nodes (or a monitor) read this node's logical time
 	router.GET("/clock", controllers.GetClock)
+
+	// NTP time information — exposes NTP time and offset
+	router.GET("/time", controllers.GetTime)
 
 	router.Run()
 }

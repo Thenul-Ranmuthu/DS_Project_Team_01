@@ -11,6 +11,7 @@ import (
 	clock "github.com/DS_node/Clock"
 	"github.com/DS_node/models"
 	"github.com/DS_node/repositories"
+	"github.com/DS_node/replication" // Added for IT24103466 tasks
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,64 +21,63 @@ func detectMIME(fileHeader *multipart.FileHeader) (string, error) {
 		return "", err
 	}
 	defer file.Close()
- 
+
 	buf := make([]byte, 512)
 	_, err = file.Read(buf)
 	if err != nil {
 		return "", err
 	}
- 
+
 	return http.DetectContentType(buf), nil
 }
- 
+
 func UploadMultipleFiles(c *gin.Context) {
-	// Lamport Clock: Sync with sender's clock if provided, otherwise just tick for this local upload event. 
+	// Lamport Clock: Sync with sender's clock if provided
 	var clockValue uint64
 	if senderClockStr := c.GetHeader("X-Lamport-Clock"); senderClockStr != "" {
 		senderClock, err := strconv.ParseUint(senderClockStr, 10, 64)
 		if err == nil {
-			// Received a clock value from another node: sync before proceeding.
 			clockValue = clock.Node.Sync(senderClock)
 		} else {
 			clockValue = clock.Node.Tick()
 		}
 	} else {
-		// Local upload event: tick the clock.
 		clockValue = clock.Node.Tick()
 	}
- 
+
 	fmt.Printf("[LamportClock] Upload event received. Clock advanced to: %d\n", clockValue)
- 
-	// Resolve the uploading user by email.
+
+	// Resolve the uploading user by email
 	usr, errorUser := repositories.GetUserByEmail(c.Param("email"))
 	if errorUser != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Email!!"})
 		return
 	}
- 
+
 	form, err := c.MultipartForm()
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid multipart form"})
 		return
 	}
- 
+
 	files := form.File["files"]
 	uploadDir := "./uploads"
 	os.MkdirAll(uploadDir, os.ModePerm)
- 
+
 	var savedRecords []models.UploadedFile
- 
+
 	for _, fileHeader := range files {
 		ext := filepath.Ext(fileHeader.Filename)
+		// Using NTP time for unique storage naming
 		storedName := fmt.Sprintf("%d%s", clock.NTP.Now().UnixNano(), ext)
 		savePath := filepath.Join(uploadDir, storedName)
- 
+
 		if err := c.SaveUploadedFile(fileHeader, savePath); err != nil {
 			continue
 		}
- 
+
 		mimeType, _ := detectMIME(fileHeader)
- 
+
 		record := models.UploadedFile{
 			OriginalName: fileHeader.Filename,
 			FilePath:     savePath,
@@ -85,18 +85,35 @@ func UploadMultipleFiles(c *gin.Context) {
 			FileSize:     fileHeader.Size,
 			UserID:       usr.ID,
 		}
- 
+
 		if err := repositories.CreateFile(&record); err == nil {
 			savedRecords = append(savedRecords, record)
+
+			// --- IT24103466: REPLICATION TRIGGER ---
+			// After saving locally, push this file to peer nodes
+			fmt.Printf("[Replicator] Triggering replication for: %s\n", fileHeader.Filename)
+			replication.ReplicateToPeers(savePath, fileHeader.Filename)
 		}
 	}
- 
-	// Return the current clock value so the caller (or another node)
-	// can synchronise their own Lamport clock.
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":       fmt.Sprintf("%d file(s) uploaded", len(savedRecords)),
 		"files":         savedRecords,
 		"lamport_clock": clockValue,
 	})
 }
- 
+
+// InternalReplicate handles files sent from other nodes (Replication Backup)
+// This is called by ReplicateToPeers from the Leader node.
+func InternalReplicate(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No file received for replication"})
+		return
+	}
+
+	uploadDir := "./uploads"
+	os.MkdirAll(uploadDir, os.ModePerm)
+
+	// We use the original filename to ensure consistency across the cluster
+	savePath := filepath.Join(uploadDir, file.Filename

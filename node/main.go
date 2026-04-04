@@ -37,7 +37,7 @@ func init() {
 		}
 	}()
 
-	// Changed from 172.30.112.1 to 127.0.0.1 for your local ZooKeeper
+	// Local ZooKeeper address
 	zkServers := []string{"127.0.0.1:2181"}
 	nodeID := os.Getenv("NODE_ID")
 	if nodeID == "" {
@@ -50,8 +50,7 @@ func init() {
 		log.Fatalf("Election manager init failed: %v", err)
 	}
 
-	// Set callbacks to integrate with your replication/clock packages
-
+	// Leader Election Callbacks
 	em.SetOnBecomeLeader(func() {
 		log.Println("This node is now leader — start accepting writes")
 		initializers.DB.Create(&models.ElectionEvent{
@@ -70,20 +69,32 @@ func init() {
 func main() {
 	router := gin.Default()
 
+	// User & Health Routes
 	router.POST("/createUser", controllers.CreateUser)
-
 	router.GET("/ping", controllers.PingEndPoint)
 
+	// File Management Routes
 	router.POST("/upload/:email", controllers.UploadMultipleFiles)
 	router.GET("/users/files/:email", controllers.GetUserFiles)
 	router.GET("/files/:id", controllers.GetFileByID)
 	router.DELETE("/files/:id", controllers.DeleteFile)
 
-	// Lamport clock — lets other nodes (or a monitor) read this node's logical time
-	router.GET("/clock", controllers.GetClock)
+	// --- MEMBER 2: INTERNAL REPLICATION ROUTE ---
+	router.POST("/internal/replicate", controllers.InternalReplicate)
 
+	// Clock & Election Monitoring
+	router.GET("/clock", controllers.GetClock)
 	router.GET("/election/status", em.HandleStatus)
 	router.POST("/election/resign", em.HandleResign)
 
-	router.Run()
+	// Start the server
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "5050"
+	}
+	
+	// Ensure there is a colon before the port
+	if err := router.Run(":" + port); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
 }

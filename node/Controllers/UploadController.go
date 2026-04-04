@@ -11,10 +11,11 @@ import (
 	clock "github.com/DS_node/Clock"
 	"github.com/DS_node/models"
 	"github.com/DS_node/repositories"
-	"github.com/DS_node/replication" // Added for IT24103466 tasks
+	"github.com/DS_node/replication" // Added for Member 2 tasks
 	"github.com/gin-gonic/gin"
 )
 
+// detectMIME reads the first 512 bytes of a file to determine its actual content type
 func detectMIME(fileHeader *multipart.FileHeader) (string, error) {
 	file, err := fileHeader.Open()
 	if err != nil {
@@ -31,6 +32,7 @@ func detectMIME(fileHeader *multipart.FileHeader) (string, error) {
 	return http.DetectContentType(buf), nil
 }
 
+// UploadMultipleFiles handles the primary upload from a client and triggers replication
 func UploadMultipleFiles(c *gin.Context) {
 	// Lamport Clock: Sync with sender's clock if provided
 	var clockValue uint64
@@ -89,8 +91,8 @@ func UploadMultipleFiles(c *gin.Context) {
 		if err := repositories.CreateFile(&record); err == nil {
 			savedRecords = append(savedRecords, record)
 
-			// --- IT24103466: REPLICATION TRIGGER ---
-			// After saving locally, push this file to peer nodes
+			// --- MEMBER 2: REPLICATION TRIGGER ---
+			// After saving locally on the Leader, push this file to the Backup peers
 			fmt.Printf("[Replicator] Triggering replication for: %s\n", fileHeader.Filename)
 			replication.ReplicateToPeers(savePath, fileHeader.Filename)
 		}
@@ -103,7 +105,7 @@ func UploadMultipleFiles(c *gin.Context) {
 	})
 }
 
-// InternalReplicate handles files sent from other nodes (Replication Backup)
+// InternalReplicate handles files sent from other nodes (Backup Node)
 // This is called by ReplicateToPeers from the Leader node.
 func InternalReplicate(c *gin.Context) {
 	file, err := c.FormFile("file")
@@ -116,4 +118,17 @@ func InternalReplicate(c *gin.Context) {
 	os.MkdirAll(uploadDir, os.ModePerm)
 
 	// We use the original filename to ensure consistency across the cluster
-	savePath := filepath.Join(uploadDir, file.Filename
+	savePath := filepath.Join(uploadDir, file.Filename)
+
+	if err := c.SaveUploadedFile(file, savePath); err != nil {
+		fmt.Printf("[Replication] Failed to save replicated file: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save replicated file"})
+		return
+	}
+
+	fmt.Printf("[Replication] Successfully synchronized file: %s\n", file.Filename)
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "File replicated successfully",
+	})
+}

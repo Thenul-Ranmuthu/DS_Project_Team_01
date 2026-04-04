@@ -82,6 +82,7 @@ func main() {
 	// --- MEMBER 2: INTERNAL REPLICATION ROUTE ---
 	router.POST("/internal/replicate", controllers.InternalReplicate)
 	router.DELETE("/internal/delete/:filename", controllers.DeleteReplica)
+	router.POST("/internal/users", controllers.InternalCreateUser)
 
 	// Clock & Election Monitoring
 	router.GET("/clock", controllers.GetClock)

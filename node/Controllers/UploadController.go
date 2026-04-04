@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	clock "github.com/DS_node/Clock"
 	"github.com/DS_node/models"
@@ -14,6 +15,19 @@ import (
 	"github.com/DS_node/repositories"
 	"github.com/gin-gonic/gin"
 )
+
+func getUploadDir() string {
+	uploadDir := os.Getenv("UPLOAD_DIR")
+	if uploadDir == "" {
+		return "./uploads"
+	}
+	return uploadDir
+}
+
+func isBlockedExtension(fileName string) bool {
+	ext := strings.ToLower(filepath.Ext(fileName))
+	return ext == ".md"
+}
 
 // detectMIME reads the first 512 bytes of a file to determine its actual content type
 func detectMIME(fileHeader *multipart.FileHeader) (string, error) {
@@ -63,12 +77,17 @@ func UploadMultipleFiles(c *gin.Context) {
 	}
 
 	files := form.File["files"]
-	uploadDir := "./uploads"
+	uploadDir := getUploadDir()
 	os.MkdirAll(uploadDir, os.ModePerm)
 
 	var savedRecords []models.UploadedFile
 
 	for _, fileHeader := range files {
+		if isBlockedExtension(fileHeader.Filename) {
+			fmt.Printf("[Upload] Skipping blocked file type: %s\n", fileHeader.Filename)
+			continue
+		}
+
 		ext := filepath.Ext(fileHeader.Filename)
 		// Using NTP time for unique storage naming
 		storedName := fmt.Sprintf("%d%s", clock.NTP.Now().UnixNano(), ext)
@@ -114,7 +133,12 @@ func InternalReplicate(c *gin.Context) {
 		return
 	}
 
-	uploadDir := "./uploads"
+	if isBlockedExtension(file.Filename) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Blocked file type"})
+		return
+	}
+
+	uploadDir := getUploadDir()
 	os.MkdirAll(uploadDir, os.ModePerm)
 
 	// We use the original filename to ensure consistency across the cluster
@@ -136,7 +160,7 @@ func InternalReplicate(c *gin.Context) {
 // DeleteReplica handles deletion requests sent from peer nodes.
 func DeleteReplica(c *gin.Context) {
 	fileName := c.Param("filename")
-	filePath := filepath.Join("./uploads", fileName)
+	filePath := filepath.Join(getUploadDir(), fileName)
 
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		fmt.Printf("[Replication] Delete skipped: %s not found locally\n", fileName)

@@ -1,50 +1,64 @@
-Data Replication and Consistency Strategy
-1. Replication Strategy: Primary-Backup (Leader-Follower)
-For this distributed file storage system, we have implemented a Primary-Backup replication strategy.
+# Data Replication and Consistency Strategy
 
-Mechanism: A single "Leader" node (elected via Zookeeper) coordinates all write operations (file uploads and deletions).
+## 1. Replication Model
+The system uses a Primary-Backup (Leader-Follower) model coordinated by ZooKeeper leader election.
 
-Data Flow: When the Leader receives a file, it first persists the data locally and then synchronously or asynchronously propagates the update to all "Follower" nodes.
+- One node is elected as Leader.
+- Other nodes run as Followers.
+- Write operations are leader-controlled and then replicated to peers.
 
-Justification: This strategy is highly effective for file systems where maintaining a single "source of truth" is critical to prevent data divergence across servers.
+## 2. Current Write Flows
 
-2. Consistency Model: Strong Consistency
-We have chosen a Strong Consistency model to ensure that any client reading from any node in the system always receives the most recent version of a file.
+### File upload replication
+- Client request enters through `POST /upload/:email`.
+- The receiving node stores the file with a generated unique name.
+- Replication fanout happens through `POST /internal/replicate` to all peers listed in `PEERS`.
+- Replicas are stored with the same generated filename so delete propagation is deterministic.
 
-Implementation: A write operation is only considered "successful" once the Leader has confirmed that the file is safely stored on a majority of nodes or the designated backups.
+### File delete replication
+- Client request enters through `DELETE /files/:id`.
+- The node resolves local file path, deletes locally, then broadcasts to peers.
+- Replication fanout uses `DELETE /internal/delete/:filename`.
 
-User Impact: This eliminates the "stale data" problem, ensuring that once a user uploads a file, it is immediately accessible across the entire distributed network.
+### User create replication (leader-routed)
+- Client request enters through `POST /createUser`.
+- If request hits a follower, the request is forwarded to the current leader.
+- Leader performs create, then replicates to peers through `POST /internal/users`.
+- Duplicate prevention is enforced by email check.
+- If user already exists, API returns `409` with `{"error":"User Already Exists"}`.
 
-3. Conflict Resolution: Lamport Logical Clocks
-To handle concurrent read/write operations and establish a strict ordering of events, the system utilizes Lamport Clocks.
+## 3. Internal Replication Endpoints
+The cluster currently uses these internal APIs:
 
-Mechanism: Each node maintains a local counter that increments with every local event. When messages are exchanged between nodes, the clocks are synchronized to ensure that the "Happened-Before" relationship is preserved.
+- `POST /internal/replicate`
+- `DELETE /internal/delete/:filename`
+- `POST /internal/users`
 
-Conflict Handling: In the event of near-simultaneous updates to the same file, the system uses the Lamport timestamp to determine the definitive order of operations, ensuring all replicas converge to the same state.
+## 4. Single-Source Multi-Instance Runtime
+All nodes run from one shared codebase (`node/`) with different env presets.
 
-4. Time Synchronization
-While Lamport Clocks handle logical ordering, the system also integrates NTP (Network Time Protocol) to maintain roughly synchronized physical clocks across servers. This provides human-readable timestamps for file metadata and assists in debugging and logging.
+- `.env.leader` (port `5000`)
+- `.env.node1` (port `5050`)
+- `.env.node2` (port `5051`)
 
-5. Implementation Note (Current Behavior)
-The replication workflow is implemented with internal node-to-node APIs and environment-based peer discovery.
+Each instance uses:
 
-Upload replication:
-- External client upload enters through /upload/:email on the receiving node.
-- The node stores the file locally with a generated unique filename.
-- The replication layer forwards that stored filename and file content to each peer using POST /internal/replicate.
-- Followers save the replica under the same stored filename for deterministic delete propagation.
+- unique `NODE_ID`
+- unique `PORT`
+- `PEERS` containing the other node base URLs
+- unique `UPLOAD_DIR` so local replica folders are visually separated
 
-Delete replication:
-- External delete enters through DELETE /files/:id.
-- The node resolves the stored file path, deletes locally, then broadcasts DELETE /internal/delete/:filename to peers.
-- Every node exposes internal handlers for both:
-	- POST /internal/replicate
-	- DELETE /internal/delete/:filename
+Example upload directories:
 
-Configuration requirements:
-- Each node must define PEERS in its .env file as a comma-separated list of other node base URLs.
-- Example: PEERS=http://localhost:5000,http://localhost:5050,http://localhost:5051 (excluding self for each node).
-- Missing or incorrect PEERS values result in partial or no replication.
+- `uploads/leader`
+- `uploads/node1`
+- `uploads/node2`
 
-Consistency note:
-- Replication calls are asynchronous, so the implementation provides eventual convergence across replicas after write/delete operations complete.
+## 5. Consistency and Ordering
+- Lamport clock headers are used to preserve logical event ordering across nodes.
+- NTP sync is used for stable wall-clock timestamps and operational logs.
+- Replication fanout is asynchronous, so behavior is eventual convergence after writes/deletes complete.
+
+## 6. Operational Constraints
+- Incorrect or missing `PEERS` values cause partial or failed replication.
+- If leader is down, ZooKeeper elects a new leader and follower forwarding targets the new leader.

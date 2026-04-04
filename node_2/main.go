@@ -80,21 +80,31 @@ func main() {
 	router.DELETE("/files/:id", controllers.DeleteFile)
 
 	// --- MEMBER 2: INTERNAL REPLICATION ROUTE ---
+	// UNCOMMENTED: Allows Node 1 to push files to this node
 	router.POST("/internal/replicate", controllers.InternalReplicate)
 	router.DELETE("/internal/delete/:filename", controllers.DeleteReplica)
 
 	// Clock & Election Monitoring
 	router.GET("/clock", controllers.GetClock)
-	router.GET("/election/status", em.HandleStatus)
-	router.POST("/election/resign", em.HandleResign)
+
+	// Wrapped in functions to ensure stability and avoid method-value errors
+	router.GET("/election/status", func(c *gin.Context) {
+		if em != nil {
+			em.HandleStatus(c)
+		}
+	})
+	router.POST("/election/resign", func(c *gin.Context) {
+		if em != nil {
+			em.HandleResign(c)
+		}
+	})
 
 	// Start the server
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "5050"
+		port = "5051" // Default for Node 2
 	}
 
-	// Ensure there is a colon before the port
 	if err := router.Run(":" + port); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}

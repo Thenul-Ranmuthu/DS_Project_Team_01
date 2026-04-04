@@ -10,12 +10,12 @@ import (
 
 	clock "github.com/DS_node/Clock"
 	"github.com/DS_node/models"
-	"github.com/DS_node/replication" // Added for Member 2 tasks
 	"github.com/DS_node/repositories"
+	"github.com/DS_node/replication"
 	"github.com/gin-gonic/gin"
 )
 
-// detectMIME reads the first 512 bytes of a file to determine its actual content type
+// detectMIME helper to identify file types
 func detectMIME(fileHeader *multipart.FileHeader) (string, error) {
 	file, err := fileHeader.Open()
 	if err != nil {
@@ -32,9 +32,8 @@ func detectMIME(fileHeader *multipart.FileHeader) (string, error) {
 	return http.DetectContentType(buf), nil
 }
 
-// UploadMultipleFiles handles the primary upload from a client and triggers replication
+// UploadMultipleFiles handles the primary write request (Leader side)
 func UploadMultipleFiles(c *gin.Context) {
-	// Lamport Clock: Sync with sender's clock if provided
 	var clockValue uint64
 	if senderClockStr := c.GetHeader("X-Lamport-Clock"); senderClockStr != "" {
 		senderClock, err := strconv.ParseUint(senderClockStr, 10, 64)
@@ -49,7 +48,6 @@ func UploadMultipleFiles(c *gin.Context) {
 
 	fmt.Printf("[LamportClock] Upload event received. Clock advanced to: %d\n", clockValue)
 
-	// Resolve the uploading user by email
 	usr, errorUser := repositories.GetUserByEmail(c.Param("email"))
 	if errorUser != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Email!!"})
@@ -70,7 +68,7 @@ func UploadMultipleFiles(c *gin.Context) {
 
 	for _, fileHeader := range files {
 		ext := filepath.Ext(fileHeader.Filename)
-		// Using NTP time for unique storage naming
+		// Generate the UNIQUE filename using NTP time
 		storedName := fmt.Sprintf("%d%s", clock.NTP.Now().UnixNano(), ext)
 		savePath := filepath.Join(uploadDir, storedName)
 
@@ -82,7 +80,7 @@ func UploadMultipleFiles(c *gin.Context) {
 
 		record := models.UploadedFile{
 			OriginalName: fileHeader.Filename,
-			FilePath:     savePath,
+			FilePath:     savePath, // This path uses the storedName
 			MimeType:     mimeType,
 			FileSize:     fileHeader.Size,
 			UserID:       usr.ID,
@@ -91,8 +89,8 @@ func UploadMultipleFiles(c *gin.Context) {
 		if err := repositories.CreateFile(&record); err == nil {
 			savedRecords = append(savedRecords, record)
 
-			// --- MEMBER 2: REPLICATION TRIGGER ---
-			// After saving locally on the Leader, push this file to the Backup peers
+			// --- TRIGGER REPLICATION ---
+			// FIX: We pass 'storedName' so the Follower saves it with the SAME name as the Leader
 			fmt.Printf("[Replicator] Triggering replication for: %s\n", storedName)
 			replication.ReplicateToPeers(savePath, storedName)
 		}
@@ -105,41 +103,37 @@ func UploadMultipleFiles(c *gin.Context) {
 	})
 }
 
-// InternalReplicate handles files sent from other nodes (Backup Node)
-// This is called by ReplicateToPeers from the Leader node.
+// InternalReplicate handles files sent from the Leader to the Backup (Follower side)
 func InternalReplicate(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No file received for replication"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No file received"})
 		return
 	}
 
 	uploadDir := "./uploads"
 	os.MkdirAll(uploadDir, os.ModePerm)
-
-	// We use the original filename to ensure consistency across the cluster
+	
+	// The follower saves the file using the EXACT filename provided by the Leader
 	savePath := filepath.Join(uploadDir, file.Filename)
 
 	if err := c.SaveUploadedFile(file, savePath); err != nil {
-		fmt.Printf("[Replication] Failed to save replicated file: %v\n", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save replicated file"})
 		return
 	}
 
 	fmt.Printf("[Replication] Successfully synchronized file: %s\n", file.Filename)
-	c.JSON(http.StatusOK, gin.H{
-		"status":  "success",
-		"message": "File replicated successfully",
-	})
+	c.JSON(http.StatusOK, gin.H{"status": "success"})
 }
 
-// DeleteReplica handles deletion requests sent from peer nodes.
+// DeleteReplica handles deletion requests from the Leader (Follower side)
 func DeleteReplica(c *gin.Context) {
 	fileName := c.Param("filename")
 	filePath := filepath.Join("./uploads", fileName)
 
+	// Check if file exists before trying to delete
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		fmt.Printf("[Replication] Delete skipped: %s not found locally\n", fileName)
+		fmt.Printf("[Replication] Delete failed: %s not found locally\n", fileName)
 		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 		return
 	}

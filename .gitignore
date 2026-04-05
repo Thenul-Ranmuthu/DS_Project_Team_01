@@ -1,7 +1,13 @@
-node/DS_node
-
 node/uploads
-node/logs/
-node/.cluster_pids
 
-.env
+node1/DS_node
+
+node2/DS_node
+
+node3/DS_node
+
+node4/DS_node
+
+ds_frontend/node_modules
+
+ds_frontend/.next

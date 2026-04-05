@@ -11,6 +11,7 @@ import (
 	"github.com/DS_node/election"
 	"github.com/DS_node/migrate"
 	"github.com/DS_node/models"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
@@ -65,7 +66,17 @@ func init() {
 }
 
 func main() {
+
 	router := gin.Default()
+
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "Idempotency-Key"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 
 	// User & Health Routes
 	router.POST("/createUser", controllers.CreateUser)

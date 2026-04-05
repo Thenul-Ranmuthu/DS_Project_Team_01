@@ -152,6 +152,21 @@ func CreateUser(c *gin.Context) {
 }
 
 func InternalCreateUser(c *gin.Context) {
+	// Lamport Clock: Sync with sender's clock if provided (peer communication)
+	var clockValue uint64
+	if senderClockStr := c.GetHeader("X-Lamport-Clock"); senderClockStr != "" {
+		senderClock, err := strconv.ParseUint(senderClockStr, 10, 64)
+		if err == nil {
+			clockValue = clock.Node.Sync(senderClock)
+		} else {
+			clockValue = clock.Node.Tick()
+		}
+	} else {
+		clockValue = clock.Node.Tick()
+	}
+
+	fmt.Printf("[LamportClock] Internal create user event received. Clock advanced to: %d\n", clockValue)
+
 	var user models.User
 	if err := c.ShouldBindJSON(&user); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

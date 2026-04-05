@@ -36,7 +36,7 @@ func init() {
 	}()
 
 	// Local ZooKeeper address
-	zkServers := []string{"127.0.0.1:2181"}
+	zkServers := []string{os.Getenv("ZK_SERVER") + ":2181"}
 	nodeID := os.Getenv("NODE_ID")
 	if nodeID == "" {
 		log.Fatal("NODE_ID environment variable is required")
@@ -88,13 +88,5 @@ func main() {
 	router.POST("/election/resign", em.HandleResign)
 
 	// Start the server
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "5050"
-	}
-
-	// Ensure there is a colon before the port
-	if err := router.Run(":" + port); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
-	}
+	router.Run()
 }

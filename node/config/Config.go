@@ -26,9 +26,9 @@ func Load() Config {
 	}
 
 	return Config{
-		NodeID:    os.Getenv("NODE_ID"),             // e.g. "node-5050"
-		Port:      os.Getenv("PORT"),                // e.g. "5050"
-		ZKServers: []string{os.Getenv("ZK_SERVER")}, // same for all nodes
+		NodeID:    os.Getenv("NODE_ID"),                       // e.g. "node-5050"
+		Port:      os.Getenv("PORT"),                          // e.g. "5050"
+		ZKServers: []string{os.Getenv("ZK_SERVER") + ":8080"}, // same for all nodes
 		Peers:     peers,
 	}
 }

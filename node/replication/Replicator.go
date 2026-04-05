@@ -11,8 +11,8 @@ import (
 	"github.com/DS_node/config"
 )
 
-// ReplicateToPeers sends the uploaded file to all other nodes in the cluster
-func ReplicateToPeers(filePath string, fileName string) {
+// ReplicateToPeers sends the uploaded file and metadata to all other nodes in the cluster
+func ReplicateToPeers(filePath string, fileName string, userID uint, originalName string, mimeType string, fileSize int64) {
 	cfg := config.Load()
 	if len(cfg.Peers) == 0 {
 		fmt.Println("[Replicator] No peers configured. Skipping upload replication.")
@@ -37,6 +37,13 @@ func ReplicateToPeers(filePath string, fileName string) {
 				return
 			}
 			io.Copy(part, file)
+
+			// Add metadata as form fields
+			writer.WriteField("user_id", fmt.Sprintf("%d", userID))
+			writer.WriteField("original_name", originalName)
+			writer.WriteField("mime_type", mimeType)
+			writer.WriteField("file_size", fmt.Sprintf("%d", fileSize))
+
 			writer.Close()
 
 			targetURL := fmt.Sprintf("%s/internal/replicate", peerURL)

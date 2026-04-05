@@ -30,3 +30,16 @@ func DeleteFile(fileID uint) error {
 	result := initializers.DB.Unscoped().Delete(&models.UploadedFile{}, fileID)
 	return result.Error
 }
+
+// Get a file by its file path
+func GetFileByPath(filePath string) (models.UploadedFile, error) {
+	var file models.UploadedFile
+	result := initializers.DB.Where("file_path = ?", filePath).First(&file)
+	return file, result.Error
+}
+
+// Delete a file record by file path
+func DeleteFileByPath(filePath string) error {
+	result := initializers.DB.Unscoped().Where("file_path = ?", filePath).Delete(&models.UploadedFile{})
+	return result.Error
+}

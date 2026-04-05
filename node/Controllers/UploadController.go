@@ -113,7 +113,7 @@ func UploadMultipleFiles(c *gin.Context) {
 			// --- MEMBER 2: REPLICATION TRIGGER ---
 			// After saving locally on the Leader, push this file to the Backup peers
 			fmt.Printf("[Replicator] Triggering replication for: %s\n", storedName)
-			replication.ReplicateToPeers(savePath, storedName)
+			replication.ReplicateToPeers(savePath, storedName, usr.ID, fileHeader.Filename, mimeType, fileHeader.Size)
 		}
 	}
 
@@ -127,6 +127,21 @@ func UploadMultipleFiles(c *gin.Context) {
 // InternalReplicate handles files sent from other nodes (Backup Node)
 // This is called by ReplicateToPeers from the Leader node.
 func InternalReplicate(c *gin.Context) {
+	// Lamport Clock: Sync with sender's clock if provided (peer communication)
+	var clockValue uint64
+	if senderClockStr := c.GetHeader("X-Lamport-Clock"); senderClockStr != "" {
+		senderClock, err := strconv.ParseUint(senderClockStr, 10, 64)
+		if err == nil {
+			clockValue = clock.Node.Sync(senderClock)
+		} else {
+			clockValue = clock.Node.Tick()
+		}
+	} else {
+		clockValue = clock.Node.Tick()
+	}
+
+	fmt.Printf("[LamportClock] Internal replicate event received. Clock advanced to: %d\n", clockValue)
+
 	file, err := c.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No file received for replication"})
@@ -150,15 +165,57 @@ func InternalReplicate(c *gin.Context) {
 		return
 	}
 
+	// Extract metadata from form fields
+	userIDStr := c.PostForm("user_id")
+	originalName := c.PostForm("original_name")
+	mimeType := c.PostForm("mime_type")
+	fileSizeStr := c.PostForm("file_size")
+
+	userID, _ := strconv.ParseUint(userIDStr, 10, 64)
+	fileSize, _ := strconv.ParseInt(fileSizeStr, 10, 64)
+
+	// Create database record for the replicated file
+	if userID > 0 {
+		record := models.UploadedFile{
+			OriginalName: originalName,
+			FilePath:     savePath,
+			MimeType:     mimeType,
+			FileSize:     fileSize,
+			UserID:       uint(userID),
+		}
+		if err := repositories.CreateFile(&record); err != nil {
+			fmt.Printf("[Replication] Failed to create database record: %v\n", err)
+			// Don't fail the request, but log it
+		} else {
+			fmt.Printf("[Replication] Database record created for file: %s\n", file.Filename)
+		}
+	}
+
 	fmt.Printf("[Replication] Successfully synchronized file: %s\n", file.Filename)
 	c.JSON(http.StatusOK, gin.H{
-		"status":  "success",
-		"message": "File replicated successfully",
+		"status":        "success",
+		"message":       "File replicated successfully",
+		"lamport_clock": clockValue,
 	})
 }
 
 // DeleteReplica handles deletion requests sent from peer nodes.
 func DeleteReplica(c *gin.Context) {
+	// Lamport Clock: Sync with sender's clock if provided (peer communication)
+	var clockValue uint64
+	if senderClockStr := c.GetHeader("X-Lamport-Clock"); senderClockStr != "" {
+		senderClock, err := strconv.ParseUint(senderClockStr, 10, 64)
+		if err == nil {
+			clockValue = clock.Node.Sync(senderClock)
+		} else {
+			clockValue = clock.Node.Tick()
+		}
+	} else {
+		clockValue = clock.Node.Tick()
+	}
+
+	fmt.Printf("[LamportClock] Delete replica event received. Clock advanced to: %d\n", clockValue)
+
 	fileName := c.Param("filename")
 	filePath := filepath.Join(getUploadDir(), fileName)
 
@@ -174,6 +231,17 @@ func DeleteReplica(c *gin.Context) {
 		return
 	}
 
+	// Delete database record by filepath
+	if err := repositories.DeleteFileByPath(filePath); err != nil {
+		fmt.Printf("[Replication] Warning: Failed to delete database record for %s: %v\n", fileName, err)
+		// Don't fail the request, but log it
+	} else {
+		fmt.Printf("[Replication] Database record deleted for file: %s\n", fileName)
+	}
+
 	fmt.Printf("[Replication] Successfully deleted replica: %s\n", fileName)
-	c.JSON(http.StatusOK, gin.H{"message": "Replica deleted successfully"})
+	c.JSON(http.StatusOK, gin.H{
+		"message":       "Replica deleted successfully",
+		"lamport_clock": clockValue,
+	})
 }

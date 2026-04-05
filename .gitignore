@@ -1,3 +1,7 @@
 node/DS_node
 
 node/uploads
+node/logs/
+node/.cluster_pids
+
+.env

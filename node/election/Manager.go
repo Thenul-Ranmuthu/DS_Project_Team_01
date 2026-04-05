@@ -17,6 +17,39 @@ const (
 	zkTimeout      = 5 * time.Second
 )
 
+var (
+	globalMu       sync.RWMutex
+	globalNodeID   string
+	globalLeaderID string
+	globalIsLeader bool
+)
+
+func CurrentNodeID() string {
+	globalMu.RLock()
+	defer globalMu.RUnlock()
+	return globalNodeID
+}
+
+func CurrentLeaderID() string {
+	globalMu.RLock()
+	defer globalMu.RUnlock()
+	return globalLeaderID
+}
+
+func IsCurrentNodeLeader() bool {
+	globalMu.RLock()
+	defer globalMu.RUnlock()
+	return globalIsLeader
+}
+
+func setGlobalState(nodeID, leaderID string, isLeader bool) {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+	globalNodeID = nodeID
+	globalLeaderID = leaderID
+	globalIsLeader = isLeader
+}
+
 type ElectionManager struct {
 	mu sync.RWMutex
 
@@ -40,6 +73,8 @@ func NewElectionManager(zkServers []string, nodeID string) (*ElectionManager, er
 		conn:   conn,
 		nodeID: nodeID,
 	}
+
+	setGlobalState(nodeID, "", false)
 
 	// Ensure persistent parent path exists
 	if err := em.ensurePath(zkElectionPath); err != nil {
@@ -87,6 +122,7 @@ func (em *ElectionManager) runElection() error {
 			em.isLeader = true
 			em.leaderID = em.nodeID
 			em.mu.Unlock()
+			setGlobalState(em.nodeID, em.nodeID, true)
 
 			log.Printf("[%s] Became LEADER", em.nodeID)
 			if em.onBecomeLeader != nil {
@@ -109,6 +145,7 @@ func (em *ElectionManager) runElection() error {
 			em.isLeader = false
 			em.leaderID = string(leaderData)
 			em.mu.Unlock()
+			setGlobalState(em.nodeID, string(leaderData), false)
 		}
 
 		log.Printf("[%s] Follower. Watching predecessor: %s", em.nodeID, predecessor)
@@ -211,7 +248,9 @@ func (em *ElectionManager) watchLeader() {
 
 		em.mu.Lock()
 		em.leaderID = string(data)
+		em.isLeader = em.nodeID == string(data)
 		em.mu.Unlock()
+		setGlobalState(em.nodeID, string(data), em.nodeID == string(data))
 
 		log.Printf("[%s] Leader is: %s", em.nodeID, string(data))
 

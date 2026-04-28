@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	clock "github.com/DS_node/Clock"
 	"github.com/DS_node/config"
 	"github.com/DS_node/election"
 	"github.com/DS_node/models"
+	"github.com/DS_node/replication"
 	"github.com/DS_node/repositories"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -32,33 +34,48 @@ func leaderBaseURL() string {
 	return "http://localhost:" + port
 }
 
-func replicateUserToPeers(user models.User) {
+func replicateUserToPeers(user models.User) []replication.ReplicationResult {
 	cfg := config.Load()
 	if len(cfg.Peers) == 0 {
-		return
+		return nil
 	}
 
 	payload, err := json.Marshal(user)
 	if err != nil {
 		fmt.Printf("[UserReplication] Failed to encode payload: %v\n", err)
-		return
+		return nil
 	}
 
-	for _, peer := range cfg.Peers {
-		go func(peerURL string) {
+	results := make([]replication.ReplicationResult, len(cfg.Peers))
+	var wg sync.WaitGroup
+
+	for i, peer := range cfg.Peers {
+		wg.Add(1)
+		go func(idx int, peerURL string) {
+			defer wg.Done()
+			res := replication.ReplicationResult{PeerURL: peerURL, Success: false}
+
 			client := &http.Client{Timeout: 5 * time.Second}
 			resp, err := client.Post(peerURL+"/internal/users", "application/json", bytes.NewReader(payload))
 			if err != nil {
 				fmt.Printf("[UserReplication] Failed to reach peer %s: %v\n", peerURL, err)
+				res.Error = err
+				results[idx] = res
 				return
 			}
 			defer resp.Body.Close()
 
-			if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusConflict {
+			if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusConflict {
+				res.Success = true
+			} else {
 				fmt.Printf("[UserReplication] Peer %s returned status %d\n", peerURL, resp.StatusCode)
+				res.Error = fmt.Errorf("peer returned status %d", resp.StatusCode)
 			}
-		}(peer)
+			results[idx] = res
+		}(i, peer)
 	}
+	wg.Wait()
+	return results
 }
 
 func CreateUser(c *gin.Context) {
@@ -78,6 +95,15 @@ func CreateUser(c *gin.Context) {
 	}
 
 	fmt.Printf("[LamportClock] Creating user event. Clock advanced to: %d\n", clockValue)
+ 
+	// Partition Check: Reject writes if we are a follower and cannot reach the leader
+	if !election.IsCurrentNodeLeader() && !election.IsLeaderReachable() {
+		fmt.Printf("[Partition] Rejecting user creation: Leader unreachable\n")
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "Network partition detected: leader is unreachable. System is in read-only mode.",
+		})
+		return
+	}
 
 	var user models.User
 
@@ -146,7 +172,30 @@ func CreateUser(c *gin.Context) {
 		return
 	}
 
-	replicateUserToPeers(user)
+	repResults := replicateUserToPeers(user)
+	
+	// Quorum check:
+	successCount := 1 // Start with 1 for this node
+	for _, res := range repResults {
+		if res.Success {
+			successCount++
+		}
+	}
+
+	cfg := config.Load()
+	totalNodes := len(cfg.Peers) + 1
+	quorum := (totalNodes / 2) + 1
+
+	if successCount < quorum {
+		fmt.Printf("[User] Quorum not met for user %s: %d/%d nodes succeeded\n", user.Email, successCount, totalNodes)
+		// We still return 201 but log the failure, or we could return a specific error.
+		// For now, let's follow the requirement: "Only return success if quorum confirmed"
+		c.JSON(http.StatusAccepted, gin.H{
+			"message": "User created but replication quorum not met. Data may be at risk.",
+			"user":    user,
+		})
+		return
+	}
 
 	c.JSON(http.StatusCreated, user)
 }

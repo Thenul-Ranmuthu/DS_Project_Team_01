@@ -11,3 +11,7 @@ node4/DS_node
 ds_frontend/node_modules
 
 ds_frontend/.next
+
+FAULT_TOLERANCE_ANALYSIS.md
+
+FAULT_TOLERANCE_QUICK_REFERENCE.md

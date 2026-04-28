@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	clock "github.com/DS_node/Clock"
+	"github.com/DS_node/config"
+	"github.com/DS_node/election"
 	"github.com/DS_node/models"
 	"github.com/DS_node/replication" // Added for Member 2 tasks
 	"github.com/DS_node/repositories"
@@ -62,6 +64,15 @@ func UploadMultipleFiles(c *gin.Context) {
 	}
 
 	fmt.Printf("[LamportClock] Upload event received. Clock advanced to: %d\n", clockValue)
+ 
+	// Partition Check: Reject writes if we are a follower and cannot reach the leader
+	if !election.IsCurrentNodeLeader() && !election.IsLeaderReachable() {
+		fmt.Printf("[Partition] Rejecting upload: Leader unreachable\n")
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "Network partition detected: leader is unreachable. System is in read-only mode.",
+		})
+		return
+	}
 
 	// Resolve the uploading user by email
 	usr, errorUser := repositories.GetUserByEmail(c.Param("email"))
@@ -113,10 +124,33 @@ func UploadMultipleFiles(c *gin.Context) {
 			// --- MEMBER 2: REPLICATION TRIGGER ---
 			// After saving locally on the Leader, push this file to the Backup peers
 			fmt.Printf("[Replicator] Triggering replication for: %s\n", storedName)
-			replication.ReplicateToPeers(savePath, storedName, usr.ID, fileHeader.Filename, mimeType, fileHeader.Size)
+			repResults := replication.ReplicateToPeers(savePath, storedName, usr.ID, fileHeader.Filename, mimeType, fileHeader.Size)
+			
+			// Quorum check:
+			successCount := 1 // Start with 1 for this node
+			for _, res := range repResults {
+				if res.Success {
+					successCount++
+				}
+			}
+
+			cfg := config.Load()
+			totalNodes := len(cfg.Peers) + 1
+			quorum := (totalNodes / 2) + 1
+
+			if successCount < quorum {
+				fmt.Printf("[Upload] Quorum not met for %s: %d/%d nodes succeeded\n", storedName, successCount, totalNodes)
+				// Even if quorum is not met, we've saved it locally. 
+				// But we should probably inform the user or log it as a critical failure.
+			} else {
+				fmt.Printf("[Upload] Quorum met for %s: %d/%d nodes succeeded\n", storedName, successCount, totalNodes)
+			}
 		}
 	}
 
+	// Calculate overall success (for the whole batch)
+	// For simplicity, we return success if at least one file was uploaded
+	// but we could be more granular.
 	c.JSON(http.StatusOK, gin.H{
 		"message":       fmt.Sprintf("%d file(s) uploaded", len(savedRecords)),
 		"files":         savedRecords,

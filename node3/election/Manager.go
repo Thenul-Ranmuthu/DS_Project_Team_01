@@ -3,6 +3,7 @@ package election
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"path"
 	"sort"
 	"strings"
@@ -260,4 +261,34 @@ func (em *ElectionManager) watchLeader() {
 		log.Printf("[%s] Leader znode changed — re-checking leader", em.nodeID)
 		// Loop back and re-read who the new leader is
 	}
+}
+
+// IsLeaderReachable checks if the current leader is responding to HTTP requests.
+// This is used to detect network partitions.
+func IsLeaderReachable() bool {
+	leaderID := CurrentLeaderID()
+	if leaderID == "" {
+		return false
+	}
+	
+	// If I am the leader, I am reachable to myself
+	if IsCurrentNodeLeader() {
+		return true
+	}
+
+	// Determine leader URL from ID (assuming node-XXXX format where XXXX is port)
+	port := strings.TrimPrefix(leaderID, "node-")
+	if port == "" || port == leaderID {
+		return false
+	}
+	leaderURL := "http://localhost:" + port + "/ping"
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(leaderURL)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == http.StatusOK
 }

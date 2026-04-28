@@ -14,4 +14,5 @@ func MigrateDB() {
 	initializers.DB.AutoMigrate(&models.UploadedFile{})
 	initializers.DB.AutoMigrate(&models.User{})
 	initializers.DB.AutoMigrate(&models.ElectionEvent{})
+	initializers.DB.AutoMigrate(&models.PendingReplication{})
 }

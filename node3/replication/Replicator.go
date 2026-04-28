@@ -2,6 +2,7 @@ package replication
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/DS_node/config"
+	"github.com/DS_node/models"
 )
 
 // ReplicationResult stores the outcome of a replication attempt to a specific peer
@@ -86,6 +88,17 @@ func ReplicateToPeers(filePath string, fileName string, userID uint, originalNam
 			} else {
 				fmt.Printf("[Replicator] Peer %s refused replication: status %d\n", peerURL, resp.StatusCode)
 				res.Error = fmt.Errorf("peer returned status %d", resp.StatusCode)
+				
+				// Queue for retry
+				meta := map[string]interface{}{
+					"file_name":     fileName,
+					"user_id":       userID,
+					"original_name": originalName,
+					"mime_type":     mimeType,
+					"file_size":     fileSize,
+				}
+				metaJSON, _ := json.Marshal(meta)
+				AddToQueue(models.ReplicateFileUpload, peerURL, string(metaJSON), filePath)
 			}
 			results[idx] = res
 		}(i, peer)
@@ -130,6 +143,9 @@ func ReplicateDeleteToPeers(fileName string) []ReplicationResult {
 				fmt.Printf("[Replicator] Peer %s unreachable for deletion: %v\n", peerURL, err)
 				res.Error = err
 				results[idx] = res
+				
+				// Queue for retry
+				AddToQueue(models.ReplicateFileDelete, peerURL, fileName, "")
 				return
 			}
 			defer resp.Body.Close()
@@ -140,6 +156,9 @@ func ReplicateDeleteToPeers(fileName string) []ReplicationResult {
 			} else {
 				fmt.Printf("[Replicator] Peer %s failed to delete: status %d\n", peerURL, resp.StatusCode)
 				res.Error = fmt.Errorf("peer returned status %d", resp.StatusCode)
+				
+				// Queue for retry
+				AddToQueue(models.ReplicateFileDelete, peerURL, fileName, "")
 			}
 			results[idx] = res
 		}(i, peer)

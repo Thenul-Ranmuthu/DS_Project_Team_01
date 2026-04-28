@@ -11,6 +11,7 @@ import (
 	"github.com/DS_node/election"
 	"github.com/DS_node/migrate"
 	"github.com/DS_node/models"
+	"github.com/DS_node/replication"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
@@ -20,6 +21,9 @@ var em *election.ElectionManager
 func init() {
 	initializers.LoadEnvVaribles()
 	migrate.MigrateDB()
+
+	// Start the replication retry worker
+	replication.StartRetryWorker()
 
 	// Initial sync at startup
 	if err := clock.NTP.Sync("pool.ntp.org"); err != nil {

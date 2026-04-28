@@ -70,6 +70,9 @@ func replicateUserToPeers(user models.User) []replication.ReplicationResult {
 			} else {
 				fmt.Printf("[UserReplication] Peer %s returned status %d\n", peerURL, resp.StatusCode)
 				res.Error = fmt.Errorf("peer returned status %d", resp.StatusCode)
+				
+				// Queue for retry
+				replication.AddToQueue(models.ReplicateUserCreate, peerURL, string(payload), "")
 			}
 			results[idx] = res
 		}(i, peer)

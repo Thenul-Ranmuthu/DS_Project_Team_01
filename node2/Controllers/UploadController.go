@@ -15,6 +15,7 @@ import (
 	"github.com/DS_node/models"
 	"github.com/DS_node/replication" // Added for Member 2 tasks
 	"github.com/DS_node/repositories"
+	initializers "github.com/DS_node/Initializers"
 	"github.com/gin-gonic/gin"
 )
 
@@ -283,4 +284,24 @@ func DeleteReplica(c *gin.Context) {
 		"message":       "Replica deleted successfully",
 		"lamport_clock": clockValue,
 	})
+}
+func GetAllFiles(c *gin.Context) {
+	var files []models.UploadedFile
+	if err := initializers.DB.Find(&files).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch files"})
+		return
+	}
+	c.JSON(http.StatusOK, files)
+}
+
+func InternalDownloadFile(c *gin.Context) {
+	fileName := c.Param("filename")
+	filePath := filepath.Join(getUploadDir(), fileName)
+
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+
+	c.File(filePath)
 }

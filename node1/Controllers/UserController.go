@@ -18,6 +18,7 @@ import (
 	"github.com/DS_node/models"
 	"github.com/DS_node/replication"
 	"github.com/DS_node/repositories"
+	initializers "github.com/DS_node/Initializers"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -249,4 +250,12 @@ func InternalCreateUser(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, user)
+}
+func GetAllUsers(c *gin.Context) {
+	var users []models.User
+	if err := initializers.DB.Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch users"})
+		return
+	}
+	c.JSON(http.StatusOK, users)
 }

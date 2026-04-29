@@ -66,6 +66,10 @@ func init() {
 			log.Fatalf("Election failed: %v", err)
 		}
 	}()
+
+	// --- AUTOMATED RECOVERY ---
+	// When a node joins, it should catch up with the leader
+	go replication.TriggerRecovery()
 }
 
 func CORSMiddleware() gin.HandlerFunc {
@@ -104,6 +108,11 @@ func main() {
 	router.POST("/internal/replicate", controllers.InternalReplicate)
 	router.DELETE("/internal/delete/:filename", controllers.DeleteReplica)
 	router.POST("/internal/users", controllers.InternalCreateUser)
+	
+	// --- RECOVERY ROUTES ---
+	router.GET("/internal/users/all", controllers.GetAllUsers)
+	router.GET("/internal/files/all", controllers.GetAllFiles)
+	router.GET("/internal/files/download/:filename", controllers.InternalDownloadFile)
 
 	// Clock & Election Monitoring
 	router.GET("/clock", controllers.GetClock)

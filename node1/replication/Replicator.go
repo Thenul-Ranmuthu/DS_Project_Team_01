@@ -39,7 +39,7 @@ func ReplicateToPeers(filePath string, fileName string, userID uint, originalNam
 		wg.Add(1)
 		go func(idx int, peerURL string) {
 			defer wg.Done()
-			
+
 			res := ReplicationResult{PeerURL: peerURL, Success: false}
 
 			// --- FIX: Queue BEFORE sending to handle In-flight crashes ---
@@ -52,7 +52,7 @@ func ReplicateToPeers(filePath string, fileName string, userID uint, originalNam
 			}
 			metaJSON, _ := json.Marshal(meta)
 			pendingRecord := AddToQueue(models.ReplicateFileUpload, peerURL, string(metaJSON), filePath)
-			
+
 			file, err := os.Open(filePath)
 			if err != nil {
 				fmt.Printf("[Replicator] Error opening local file: %v\n", err)

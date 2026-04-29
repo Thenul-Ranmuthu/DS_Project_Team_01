@@ -61,7 +61,7 @@ func DeleteFile(c *gin.Context) {
 	}
 
 	fmt.Printf("[LamportClock] Delete event received. Clock: %d\n", clockValue)
- 
+
 	// Partition Check: Reject writes if we are a follower and cannot reach the leader
 	if !election.IsCurrentNodeLeader() && !election.IsLeaderReachable() {
 		fmt.Printf("[Partition] Rejecting delete: Leader unreachable\n")

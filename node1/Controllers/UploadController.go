@@ -10,12 +10,12 @@ import (
 	"strings"
 
 	clock "github.com/DS_node/Clock"
+	initializers "github.com/DS_node/Initializers"
 	"github.com/DS_node/config"
 	"github.com/DS_node/election"
 	"github.com/DS_node/models"
 	"github.com/DS_node/replication" // Added for Member 2 tasks
 	"github.com/DS_node/repositories"
-	initializers "github.com/DS_node/Initializers"
 	"github.com/gin-gonic/gin"
 )
 
@@ -65,7 +65,7 @@ func UploadMultipleFiles(c *gin.Context) {
 	}
 
 	fmt.Printf("[LamportClock] Upload event received. Clock advanced to: %d\n", clockValue)
- 
+
 	// Partition Check: Reject writes if we are a follower and cannot reach the leader
 	if !election.IsCurrentNodeLeader() && !election.IsLeaderReachable() {
 		fmt.Printf("[Partition] Rejecting upload: Leader unreachable\n")
@@ -127,7 +127,7 @@ func UploadMultipleFiles(c *gin.Context) {
 			// After saving locally on the Leader, push this file to the Backup peers
 			fmt.Printf("[Replicator] Triggering replication for: %s\n", storedName)
 			repResults := replication.ReplicateToPeers(savePath, storedName, usr.ID, fileHeader.Filename, mimeType, fileHeader.Size, clockValue)
-			
+
 			// Quorum check:
 			successCount := 1 // Start with 1 for this node
 			for _, res := range repResults {

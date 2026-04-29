@@ -15,7 +15,7 @@ import (
 )
 
 // AddToQueue records a failed replication for later retry
-func AddToQueue(repType models.ReplicationType, peerURL string, payload string, filePath string) {
+func AddToQueue(repType models.ReplicationType, peerURL string, payload string, filePath string) *models.PendingReplication {
 	pending := models.PendingReplication{
 		Type:          repType,
 		TargetPeer:    peerURL,
@@ -28,9 +28,19 @@ func AddToQueue(repType models.ReplicationType, peerURL string, payload string, 
 
 	if err := initializers.DB.Create(&pending).Error; err != nil {
 		fmt.Printf("[ReplicationQueue] Failed to save pending replication: %v\n", err)
+		return nil
 	} else {
 		fmt.Printf("[ReplicationQueue] Added %s for %s to retry queue\n", repType, peerURL)
+		return &pending
 	}
+}
+
+// RemoveFromQueue deletes a record from the database
+func RemoveFromQueue(p *models.PendingReplication) {
+	if p == nil || p.ID == 0 {
+		return
+	}
+	initializers.DB.Unscoped().Delete(p)
 }
 
 // StartRetryWorker periodically checks the DB for failed replications and retries them

@@ -55,6 +55,9 @@ func replicateUserToPeers(user models.User) []replication.ReplicationResult {
 			defer wg.Done()
 			res := replication.ReplicationResult{PeerURL: peerURL, Success: false}
 
+			// --- FIX: Queue BEFORE sending to handle in-flight crashes ---
+			pendingRecord := replication.AddToQueue(models.ReplicateUserCreate, peerURL, string(payload), "")
+
 			client := &http.Client{Timeout: 5 * time.Second}
 			resp, err := client.Post(peerURL+"/internal/users", "application/json", bytes.NewReader(payload))
 			if err != nil {
@@ -67,12 +70,12 @@ func replicateUserToPeers(user models.User) []replication.ReplicationResult {
 
 			if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusConflict {
 				res.Success = true
+				// Success: Remove from queue
+				replication.RemoveFromQueue(pendingRecord)
 			} else {
 				fmt.Printf("[UserReplication] Peer %s returned status %d\n", peerURL, resp.StatusCode)
 				res.Error = fmt.Errorf("peer returned status %d", resp.StatusCode)
-				
-				// Queue for retry
-				replication.AddToQueue(models.ReplicateUserCreate, peerURL, string(payload), "")
+				// Keep in queue for retry worker
 			}
 			results[idx] = res
 		}(i, peer)

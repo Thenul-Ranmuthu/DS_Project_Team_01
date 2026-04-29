@@ -40,6 +40,17 @@ func ReplicateToPeers(filePath string, fileName string, userID uint, originalNam
 			defer wg.Done()
 			
 			res := ReplicationResult{PeerURL: peerURL, Success: false}
+
+			// --- FIX: Queue BEFORE sending to handle In-flight crashes ---
+			meta := map[string]interface{}{
+				"file_name":     fileName,
+				"user_id":       userID,
+				"original_name": originalName,
+				"mime_type":     mimeType,
+				"file_size":     fileSize,
+			}
+			metaJSON, _ := json.Marshal(meta)
+			pendingRecord := AddToQueue(models.ReplicateFileUpload, peerURL, string(metaJSON), filePath)
 			
 			file, err := os.Open(filePath)
 			if err != nil {
@@ -85,20 +96,12 @@ func ReplicateToPeers(filePath string, fileName string, userID uint, originalNam
 			if resp.StatusCode == http.StatusOK {
 				fmt.Printf("[Replicator] Successfully replicated %s to %s\n", fileName, peerURL)
 				res.Success = true
+				// Success: Remove from queue
+				RemoveFromQueue(pendingRecord)
 			} else {
 				fmt.Printf("[Replicator] Peer %s refused replication: status %d\n", peerURL, resp.StatusCode)
 				res.Error = fmt.Errorf("peer returned status %d", resp.StatusCode)
-				
-				// Queue for retry
-				meta := map[string]interface{}{
-					"file_name":     fileName,
-					"user_id":       userID,
-					"original_name": originalName,
-					"mime_type":     mimeType,
-					"file_size":     fileSize,
-				}
-				metaJSON, _ := json.Marshal(meta)
-				AddToQueue(models.ReplicateFileUpload, peerURL, string(metaJSON), filePath)
+				// Keep in queue for retry worker
 			}
 			results[idx] = res
 		}(i, peer)
@@ -126,6 +129,9 @@ func ReplicateDeleteToPeers(fileName string) []ReplicationResult {
 			defer wg.Done()
 			res := ReplicationResult{PeerURL: peerURL, Success: false}
 
+			// --- FIX: Queue BEFORE sending ---
+			pendingRecord := AddToQueue(models.ReplicateFileDelete, peerURL, fileName, "")
+
 			// Construct the internal delete URL
 			deleteURL := fmt.Sprintf("%s/internal/delete/%s", peerURL, fileName)
 
@@ -143,9 +149,6 @@ func ReplicateDeleteToPeers(fileName string) []ReplicationResult {
 				fmt.Printf("[Replicator] Peer %s unreachable for deletion: %v\n", peerURL, err)
 				res.Error = err
 				results[idx] = res
-				
-				// Queue for retry
-				AddToQueue(models.ReplicateFileDelete, peerURL, fileName, "")
 				return
 			}
 			defer resp.Body.Close()
@@ -153,12 +156,12 @@ func ReplicateDeleteToPeers(fileName string) []ReplicationResult {
 			if resp.StatusCode == http.StatusOK {
 				fmt.Printf("[Replicator] Successfully deleted replica %s from %s\n", fileName, peerURL)
 				res.Success = true
+				// Success: Remove from queue
+				RemoveFromQueue(pendingRecord)
 			} else {
 				fmt.Printf("[Replicator] Peer %s failed to delete: status %d\n", peerURL, resp.StatusCode)
 				res.Error = fmt.Errorf("peer returned status %d", resp.StatusCode)
-				
-				// Queue for retry
-				AddToQueue(models.ReplicateFileDelete, peerURL, fileName, "")
+				// Keep in queue
 			}
 			results[idx] = res
 		}(i, peer)

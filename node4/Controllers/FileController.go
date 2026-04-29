@@ -9,6 +9,7 @@ import (
 
 	// Ensure these match your folder structure exactly
 	clock "github.com/DS_node/Clock"
+	"github.com/DS_node/election"
 	"github.com/DS_node/replication" 
 	"github.com/DS_node/repositories"
 	"github.com/gin-gonic/gin"
@@ -60,6 +61,15 @@ func DeleteFile(c *gin.Context) {
 	}
 
 	fmt.Printf("[LamportClock] Delete event received. Clock: %d\n", clockValue)
+ 
+	// Partition Check: Reject writes if we are a follower and cannot reach the leader
+	if !election.IsCurrentNodeLeader() && !election.IsLeaderReachable() {
+		fmt.Printf("[Partition] Rejecting delete: Leader unreachable\n")
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "Network partition detected: leader is unreachable. System is in read-only mode.",
+		})
+		return
+	}
 
 	fileID, err := strconv.ParseUint(fileIDStr, 10, 32)
 	if err != nil {

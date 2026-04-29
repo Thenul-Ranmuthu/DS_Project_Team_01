@@ -92,6 +92,7 @@ func UploadMultipleFiles(c *gin.Context) {
 	os.MkdirAll(uploadDir, os.ModePerm)
 
 	var savedRecords []models.UploadedFile
+	var quorumFailed bool
 
 	for _, fileHeader := range files {
 		if isBlockedExtension(fileHeader.Filename) {
@@ -140,19 +141,23 @@ func UploadMultipleFiles(c *gin.Context) {
 
 			if successCount < quorum {
 				fmt.Printf("[Upload] Quorum not met for %s: %d/%d nodes succeeded\n", storedName, successCount, totalNodes)
-				// Even if quorum is not met, we've saved it locally. 
-				// But we should probably inform the user or log it as a critical failure.
+				quorumFailed = true
 			} else {
 				fmt.Printf("[Upload] Quorum met for %s: %d/%d nodes succeeded\n", storedName, successCount, totalNodes)
 			}
 		}
 	}
 
-	// Calculate overall success (for the whole batch)
-	// For simplicity, we return success if at least one file was uploaded
-	// but we could be more granular.
-	c.JSON(http.StatusOK, gin.H{
-		"message":       fmt.Sprintf("%d file(s) uploaded", len(savedRecords)),
+	// Calculate overall success
+	status := http.StatusOK
+	message := fmt.Sprintf("%d file(s) uploaded", len(savedRecords))
+	if quorumFailed {
+		status = http.StatusAccepted
+		message += " (Warning: Replication quorum not met for some files. Retries queued.)"
+	}
+
+	c.JSON(status, gin.H{
+		"message":       message,
 		"files":         savedRecords,
 		"lamport_clock": clockValue,
 	})

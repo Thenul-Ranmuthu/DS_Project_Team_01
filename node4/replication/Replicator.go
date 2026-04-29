@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -23,8 +24,8 @@ type ReplicationResult struct {
 }
 
 // ReplicateToPeers sends the uploaded file and metadata to all other nodes in the cluster
-// It returns a slice of results for each peer.
-func ReplicateToPeers(filePath string, fileName string, userID uint, originalName string, mimeType string, fileSize int64) []ReplicationResult {
+// It returns a slice of results for each peer and includes Lamport clock synchronization.
+func ReplicateToPeers(filePath string, fileName string, userID uint, originalName string, mimeType string, fileSize int64, lamportClock uint64) []ReplicationResult {
 	cfg := config.Load()
 	if len(cfg.Peers) == 0 {
 		fmt.Println("[Replicator] No peers configured. Skipping upload replication.")
@@ -83,8 +84,18 @@ func ReplicateToPeers(filePath string, fileName string, userID uint, originalNam
 
 			targetURL := fmt.Sprintf("%s/internal/replicate", peerURL)
 
+			req, err := http.NewRequest(http.MethodPost, targetURL, body)
+			if err != nil {
+				fmt.Printf("[Replicator] Error creating request: %v\n", err)
+				res.Error = err
+				results[idx] = res
+				return
+			}
+			req.Header.Set("Content-Type", writer.FormDataContentType())
+			req.Header.Set("X-Lamport-Clock", strconv.FormatUint(lamportClock, 10))
+
 			client := &http.Client{Timeout: 10 * time.Second}
-			resp, err := client.Post(targetURL, writer.FormDataContentType(), body)
+			resp, err := client.Do(req)
 			if err != nil {
 				fmt.Printf("[Replicator] Failed to reach peer %s: %v\n", peerURL, err)
 				res.Error = err
@@ -112,7 +123,7 @@ func ReplicateToPeers(filePath string, fileName string, userID uint, originalNam
 }
 
 // ReplicateDeleteToPeers sends a DELETE request to all configured backup nodes
-func ReplicateDeleteToPeers(fileName string) []ReplicationResult {
+func ReplicateDeleteToPeers(fileName string, lamportClock uint64) []ReplicationResult {
 	cfg := config.Load()
 
 	if len(cfg.Peers) == 0 {
@@ -142,6 +153,8 @@ func ReplicateDeleteToPeers(fileName string) []ReplicationResult {
 				results[idx] = res
 				return
 			}
+
+			req.Header.Set("X-Lamport-Clock", strconv.FormatUint(lamportClock, 10))
 
 			client := &http.Client{Timeout: 5 * time.Second}
 			resp, err := client.Do(req)

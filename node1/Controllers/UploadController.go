@@ -126,7 +126,7 @@ func UploadMultipleFiles(c *gin.Context) {
 			// --- MEMBER 2: REPLICATION TRIGGER ---
 			// After saving locally on the Leader, push this file to the Backup peers
 			fmt.Printf("[Replicator] Triggering replication for: %s\n", storedName)
-			repResults := replication.ReplicateToPeers(savePath, storedName, usr.ID, fileHeader.Filename, mimeType, fileHeader.Size)
+			repResults := replication.ReplicateToPeers(savePath, storedName, usr.ID, fileHeader.Filename, mimeType, fileHeader.Size, clockValue)
 			
 			// Quorum check:
 			successCount := 1 // Start with 1 for this node
@@ -172,7 +172,7 @@ func InternalReplicate(c *gin.Context) {
 	if senderClockStr := c.GetHeader("X-Lamport-Clock"); senderClockStr != "" {
 		senderClock, err := strconv.ParseUint(senderClockStr, 10, 64)
 		if err == nil {
-			clockValue = clock.Node.Sync(senderClock)
+			clockValue = clock.Node.SyncValue(senderClock)
 		} else {
 			clockValue = clock.Node.Tick()
 		}
@@ -246,7 +246,7 @@ func DeleteReplica(c *gin.Context) {
 	if senderClockStr := c.GetHeader("X-Lamport-Clock"); senderClockStr != "" {
 		senderClock, err := strconv.ParseUint(senderClockStr, 10, 64)
 		if err == nil {
-			clockValue = clock.Node.Sync(senderClock)
+			clockValue = clock.Node.SyncValue(senderClock)
 		} else {
 			clockValue = clock.Node.Tick()
 		}

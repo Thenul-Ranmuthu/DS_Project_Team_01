@@ -7,12 +7,13 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/DS_node/config"
 )
 
 // ReplicateToPeers sends the uploaded file and metadata to all other nodes in the cluster
-func ReplicateToPeers(filePath string, fileName string, userID uint, originalName string, mimeType string, fileSize int64) {
+func ReplicateToPeers(filePath string, fileName string, userID uint, originalName string, mimeType string, fileSize int64, lamportClock uint64) {
 	cfg := config.Load()
 	if len(cfg.Peers) == 0 {
 		fmt.Println("[Replicator] No peers configured. Skipping upload replication.")
@@ -48,7 +49,16 @@ func ReplicateToPeers(filePath string, fileName string, userID uint, originalNam
 
 			targetURL := fmt.Sprintf("%s/internal/replicate", peerURL)
 
-			resp, err := http.Post(targetURL, writer.FormDataContentType(), body)
+			req, err := http.NewRequest(http.MethodPost, targetURL, body)
+			if err != nil {
+				fmt.Printf("[Replicator] Error creating request: %v\n", err)
+				return
+			}
+			req.Header.Set("Content-Type", writer.FormDataContentType())
+			req.Header.Set("X-Lamport-Clock", strconv.FormatUint(lamportClock, 10))
+
+			client := &http.Client{}
+			resp, err := client.Do(req)
 			if err != nil {
 				fmt.Printf("[Replicator] Failed to reach peer %s: %v\n", peerURL, err)
 				return
@@ -65,7 +75,7 @@ func ReplicateToPeers(filePath string, fileName string, userID uint, originalNam
 }
 
 // ReplicateDeleteToPeers sends a DELETE request to all configured backup nodes
-func ReplicateDeleteToPeers(fileName string) {
+func ReplicateDeleteToPeers(fileName string, lamportClock uint64) {
 	cfg := config.Load()
 
 	if len(cfg.Peers) == 0 {
@@ -82,6 +92,8 @@ func ReplicateDeleteToPeers(fileName string) {
 			fmt.Printf("[Replicator] Failed to create delete request for %s: %v\n", peer, err)
 			continue
 		}
+
+		req.Header.Set("X-Lamport-Clock", strconv.FormatUint(lamportClock, 10))
 
 		client := &http.Client{}
 		resp, err := client.Do(req)

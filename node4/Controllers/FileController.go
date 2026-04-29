@@ -9,7 +9,7 @@ import (
 
 	// Ensure these match your folder structure exactly
 	clock "github.com/DS_node/Clock"
-	"github.com/DS_node/replication" 
+	"github.com/DS_node/replication"
 	"github.com/DS_node/repositories"
 	"github.com/gin-gonic/gin"
 )
@@ -83,9 +83,9 @@ func DeleteFile(c *gin.Context) {
 	// Extract the actual filename (e.g. 1712248593.png)
 	fileName := filepath.Base(file.FilePath)
 	fmt.Printf("[Replicator] Telling peers to delete: %s\n", fileName)
-	
+
 	// Calling the replication package
-	replication.ReplicateDeleteToPeers(fileName)
+	replication.ReplicateDeleteToPeers(fileName, clockValue)
 
 	// 4. Delete from DB
 	if err := repositories.DeleteFile(uint(fileID)); err != nil {
@@ -94,7 +94,7 @@ func DeleteFile(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "File deleted from cluster successfully",
+		"message":       "File deleted from cluster successfully",
 		"lamport_clock": clockValue,
 	})
 }
